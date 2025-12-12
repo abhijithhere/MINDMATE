@@ -1,0 +1,40 @@
+name: mindmate
+description: "A new Flutter project."
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # Icons
+  cupertino_icons: ^1.0.6
+
+  # Your Project Packages
+  speech_to_text: ^7.0.0
+  http: ^1.1.0
+  path_provider: ^2.1.1
+  permission_handler: ^11.0.1
+  
+  # AUDIO RECORDING (High Quality for Backend)
+  record: ^5.1.0
+  
+
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+
+
+
+# Fix for linux version conflict
+dependency_overrides:
+  record_linux: ^1.2.0
+
+flutter:
+  uses-material-design: true
