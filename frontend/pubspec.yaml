@@ -9,30 +9,22 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
-  # Icons
-  cupertino_icons: ^1.0.6
-
-  # Your Project Packages
-  speech_to_text: ^7.0.0
-  http: ^1.1.0
-  path_provider: ^2.1.1
-  permission_handler: ^11.0.1
-  
-  # AUDIO RECORDING (High Quality for Backend)
+  flutter_background_service: ^5.0.0   # The Core Background Service
+  shared_preferences: ^2.2.0   # Required for the Switch logic
+  permission_handler: ^11.0.0    # Required for Microphone permission
   record: ^5.1.0
-  
-
-
+  google_fonts: ^6.1.0  # For modern typography
+  http: ^1.1.0          # To talk to your FastAPI
+  animate_do: ^3.1.0    # For the smooth fade-ins
+  avatar_glow: ^2.0.2   # For the listening orb animation
+  glassmorphism: ^3.0.0
+  intl: ^0.19.0
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^2.0.0
 
-
-
-
-# Fix for linux version conflict
+# Linux fix (safe to keep)
 dependency_overrides:
   record_linux: ^1.2.0
 

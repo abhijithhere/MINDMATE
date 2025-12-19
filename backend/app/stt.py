@@ -1,31 +1,49 @@
 from faster_whisper import WhisperModel
+import os
 
-# Keep 'base.en' for accuracy
-MODEL_SIZE = "base.en"
+# Configuration: 'tiny', 'base', 'small', 'medium', 'large'
+# 'base.en' is a good tradeoff for speed/accuracy on CPU
+MODEL_SIZE = "base.en" 
+_model_instance = None
 
-model = None
+def get_model():
+    """Singleton to load the heavy model only once."""
+    global _model_instance
+    if _model_instance is None:
+        print(f"⏳ Loading Whisper Model ({MODEL_SIZE})...")
+        try:
+            # Run on CPU with INT8 quantization (faster, less RAM)
+            _model_instance = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
+            print("✅ Whisper Loaded.")
+        except Exception as e:
+            print(f"❌ Error loading Whisper: {e}")
+            return None
+    return _model_instance
 
-def load_model():
-    global model
-    if model is None:
-        print(f"Loading Whisper: {MODEL_SIZE} ...")
-        model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8", cpu_threads=4)
-        print("Whisper Loaded.")
-    return model
+def transcribe_file(audio_path: str) -> str:
+    """Transcribes an audio file to text."""
+    if not os.path.exists(audio_path):
+        print(f"❌ Audio file not found: {audio_path}")
+        return ""
 
-def transcribe_file(file_path: str) -> str:
-    loaded_model = load_model()
     try:
-        # CHANGED: vad_filter=False (Don't auto-delete silence/noise)
-        # This ensures even quiet speech gets transcribed.
-        segments, _ = loaded_model.transcribe(
-            file_path, 
-            beam_size=5, 
+        model = get_model()
+        if not model:
+            return ""
+
+        # Transcribe
+        segments, info = model.transcribe(
+            audio_path,
+            beam_size=5,
             language="en",
-            condition_on_previous_text=False,
-            vad_filter=False 
+            vad_filter=True # Filter out silence
         )
-        text = " ".join([s.text for s in segments]).strip()
-        return text
+
+        # Combine segments into one string
+        full_text = " ".join([segment.text for segment in segments]).strip()
+        print(f"📝 Transcription: '{full_text}'")
+        return full_text
+
     except Exception as e:
-        return f"Error: {str(e)}"
+        print(f"❌ STT Error: {e}")
+        return ""

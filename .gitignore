@@ -1,0 +1,23 @@
+# Python / Backend
+.env
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+ENV/
+.DS_Store
+*.wav
+backend/db/*.db
+backend/models/*.pkl
+*.db
+*.sqlite3
+backend/mindmate.db
+
+# Flutter / Frontend
+frontend/build/
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.idea/
+frontend/android/.gradle
+frontend/ios/Flutter/Generated.xcconfig

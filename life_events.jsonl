@@ -1,0 +1,12 @@
+{"user_id":"U001","date":"2025-02-01","weekday":6,"start_time":"06:30","end_time":"07:00","activity":"Wake Up","category":"Routine"}
+{"user_id":"U001","date":"2025-02-01","weekday":6,"start_time":"07:00","end_time":"08:00","activity":"Breakfast","category":"Routine"}
+{"user_id":"U001","date":"2025-02-01","weekday":6,"start_time":"09:00","end_time":"12:00","activity":"College Class","category":"Education"}
+{"user_id":"U001","date":"2025-02-01","weekday":6,"start_time":"13:00","end_time":"15:00","activity":"Study","category":"Education"}
+{"user_id":"U001","date":"2025-02-01","weekday":6,"start_time":"18:00","end_time":"19:00","activity":"Gym","category":"Health"}
+{"user_id":"U001","date":"2025-02-01","weekday":6,"start_time":"22:30","end_time":"06:30","activity":"Sleep","category":"Rest"}
+
+{"user_id":"U001","date":"2025-02-02","weekday":0,"start_time":"07:00","end_time":"08:00","activity":"Breakfast","category":"Routine"}
+{"user_id":"U001","date":"2025-02-02","weekday":0,"start_time":"09:00","end_time":"12:00","activity":"College Class","category":"Education"}
+{"user_id":"U001","date":"2025-02-02","weekday":0,"start_time":"15:00","end_time":"17:00","activity":"Project Work","category":"Education"}
+{"user_id":"U001","date":"2025-02-02","weekday":0,"start_time":"18:00","end_time":"19:00","activity":"Gym","category":"Health"}
+{"user_id":"U001","date":"2025-02-02","weekday":0,"start_time":"23:00","end_time":"06:30","activity":"Sleep","category":"Rest"}

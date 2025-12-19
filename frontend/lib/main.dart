@@ -1,363 +1,204 @@
 import 'package:flutter/material.dart';
-import 'chat_pages.dart';   
-import 'chat_history.dart'; 
+import 'package:flutter/services.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'services/background_service.dart';
+import 'screens/home_screen.dart';
+import 'screens/timeline_screen.dart';
+import 'screens/login_screen.dart';
+import 'screens/planner_screen.dart';
+// --- CUSTOM COLORS ---
+const Color kBackgroundDark = Color(0xFF121212);
+const Color kCardDark = Color(0xFF1E1E1E);
+const Color kPrimaryTeal = Color(0xFF00E5FF);
+const Color kAccentGreen = Color(0xFF00C853);
+const Color kTextWhite = Color(0xFFFFFFFF);
+const Color kTextGrey = Color(0xFFB3B3B3);
 
-void main() {
-  runApp(const ChatpodiaApp());
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  
+  // 1. Initialize Background Service
+  await initializeService();
+
+  // 2. Check Login Status
+  SharedPreferences prefs = await SharedPreferences.getInstance();
+  bool isLoggedIn = prefs.getBool('isLoggedIn') ?? false;
+
+  runApp(MyApp(isLoggedIn: isLoggedIn));
 }
 
-// --- Constants (Refined for "Clean/No-Glow" Look) ---
-const Color kBackgroundColor = Color(0xFF0B0F14); // Deep matte black
-const Color kPrimaryTeal = Color(0xFF19D3B1);     // Muted Teal
-const Color kAccentGreen = Color(0xFF3DF5C9);     // Soft Aqua
-const Color kCardGlass = Color(0xFF1C2229);       // Slightly lighter for cards
-const Color kTextColor = Colors.white;
-const Color kSecondaryTextColor = Color(0xFF94A3B8);
-
-class ChatpodiaApp extends StatelessWidget {
-  const ChatpodiaApp({super.key});
+class MyApp extends StatelessWidget {
+  final bool isLoggedIn;
+  const MyApp({super.key, required this.isLoggedIn});
 
   @override
   Widget build(BuildContext context) {
+    SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+      statusBarColor: Colors.transparent,
+      statusBarIconBrightness: Brightness.light,
+    ));
+
     return MaterialApp(
-      title: 'MindMate',
       debugShowCheckedModeBanner: false,
+      title: 'MindMate',
       theme: ThemeData.dark().copyWith(
-        scaffoldBackgroundColor: kBackgroundColor,
+        scaffoldBackgroundColor: kBackgroundDark,
         primaryColor: kPrimaryTeal,
         appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
+          backgroundColor: kBackgroundDark,
           elevation: 0,
+          centerTitle: true,
+          titleTextStyle: TextStyle(
+            color: kTextWhite,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+            fontFamily: 'Poppins',
+          ),
+          iconTheme: IconThemeData(color: kTextWhite),
         ),
-        textTheme: const TextTheme(
-          bodyMedium: TextStyle(color: kTextColor),
-        ),
-        colorScheme: const ColorScheme.dark().copyWith(
+        colorScheme: const ColorScheme.dark(
           primary: kPrimaryTeal,
           secondary: kAccentGreen,
+          surface: kCardDark,
+          background: kBackgroundDark,
         ),
       ),
-      home: const MainScreen(),
+      // Use MainLayout if logged in, otherwise LoginScreen
+      home: isLoggedIn ? const MainLayout() : const LoginScreen(),
     );
   }
 }
 
-class MainScreen extends StatefulWidget {
-  const MainScreen({super.key});
+// --- MAIN LAYOUT (Bottom Nav + Voice Orb) ---
+class MainLayout extends StatefulWidget {
+  const MainLayout({super.key});
 
   @override
-  State<MainScreen> createState() => _MainScreenState();
+  State<MainLayout> createState() => _MainLayoutState();
 }
 
-class _MainScreenState extends State<MainScreen> {
-  int _currentIndex = 0;
+class _MainLayoutState extends State<MainLayout> {
+  int _selectedIndex = 0;
+
+  // The screens available in the bottom bar
+  final List<Widget> _screens = [
+    const HomeScreen(),
+    const TimelineScreen(),
+    const PlannerScreen(),
+  ];
+
+  void _onItemTapped(int index) {
+    setState(() {
+      _selectedIndex = index;
+    });
+  }
+
+  // ✅ FIX: The missing function is added here
+  void _openVoiceOrb() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => Container(
+        height: 350,
+        decoration: BoxDecoration(
+          color: kCardDark,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
+          border: Border(top: BorderSide(color: kPrimaryTeal.withOpacity(0.5), width: 1)),
+          boxShadow: [
+            BoxShadow(color: kPrimaryTeal.withOpacity(0.2), blurRadius: 20, spreadRadius: 5)
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            // Glowing Orb Animation Placeholder
+            Container(
+              height: 80,
+              width: 80,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: kPrimaryTeal,
+                boxShadow: [
+                  BoxShadow(color: kPrimaryTeal.withOpacity(0.6), blurRadius: 40, spreadRadius: 10)
+                ],
+              ),
+              child: const Icon(Icons.mic, size: 40, color: Colors.black),
+            ),
+            const SizedBox(height: 30),
+            const Text(
+              "Listening...",
+              style: TextStyle(color: kTextWhite, fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 10),
+            const Text(
+              "Say 'Add a memory' or 'Schedule a meeting'",
+              style: TextStyle(color: kTextGrey, fontSize: 14),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    // Page List
-    final List<Widget> pages = [
-      const HomePage(),          // Index 0: New Minimal Dashboard
-      const ChatHistoryPage(),   // Index 1: History
-      const Center(child: Text("Notes")), // Index 2 (Placeholder)
-      const Center(child: Text("Profile")), // Index 3 (Placeholder)
-    ];
-
     return Scaffold(
-      body: Stack(
-        children: [
-          // Background: Subtle top-left gradient (No heavy neon)
-          Positioned(
-            top: -100,
-            left: -100,
-            child: Container(
-              width: 400,
-              height: 400,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: kPrimaryTeal.withOpacity(0.15), // Very subtle
-                boxShadow: [
-                  BoxShadow(
-                    blurRadius: 100,
-                    color: kPrimaryTeal.withOpacity(0.15), // Color is required for the shadow to be seen
-                  ),
-                ],
+      // Show the selected screen
+      body: _screens[_selectedIndex],
+      
+      // Floating Action Button (The Voice Orb)
+      floatingActionButton: SizedBox(
+        height: 70,
+        width: 70,
+        child: FloatingActionButton(
+          onPressed: _openVoiceOrb, // Calls the function above
+          backgroundColor: kCardDark,
+          elevation: 10,
+          shape: const CircleBorder(),
+          child: Container(
+            decoration: const BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [kPrimaryTeal, kAccentGreen],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
+            child: const Center(
+              child: Icon(Icons.mic_rounded, size: 32, color: Colors.black),
+            ),
           ),
-          pages[_currentIndex], 
-        ],
+        ),
       ),
-      
-      // Voice Button: ONLY on Home Page
-      floatingActionButton: _currentIndex == 0 
-          ? FloatingActionButton(
-              onPressed: () {
-                Navigator.of(context).push(
-                  MaterialPageRoute(builder: (context) => const VoiceInteractionPage()),
-                );
-              },
-              backgroundColor: kPrimaryTeal,
-              elevation: 4, // Subtle shadow, no neon glow
-              child: const Icon(Icons.mic, color: Colors.black),
-            )
-          : null,
-      
       floatingActionButtonLocation: FloatingActionButtonLocation.centerDocked,
-      
+
+      // Bottom Navigation Bar
       bottomNavigationBar: BottomAppBar(
-        color: const Color(0xFF13181E).withOpacity(0.9), // Solid matte dark
-        shape: const CircularNotchedRectangle(),
-        notchMargin: 8.0,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 4.0),
+        // ... (keep existing properties)
+        child: SizedBox(
+          height: 60,
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
               IconButton(
-                icon: Icon(Icons.home_filled,
-                    color: _currentIndex == 0 ? kAccentGreen : kSecondaryTextColor),
-                onPressed: () => setState(() => _currentIndex = 0),
+                icon: Icon(Icons.dashboard_rounded, 
+                  color: _selectedIndex == 0 ? kPrimaryTeal : kTextGrey, size: 28),
+                onPressed: () => _onItemTapped(0),
+              ),
+              IconButton( // Middle Planner Button
+                icon: Icon(Icons.calendar_month_rounded, 
+                  color: _selectedIndex == 2 ? kPrimaryTeal : kTextGrey, size: 28),
+                onPressed: () => _onItemTapped(2),
               ),
               IconButton(
-                icon: Icon(Icons.chat_bubble_outline,
-                    color: _currentIndex == 1 ? kAccentGreen : kSecondaryTextColor),
-                onPressed: () => setState(() => _currentIndex = 1),
-              ),
-              const SizedBox(width: 48), 
-              IconButton(
-                icon: Icon(Icons.note_alt_outlined, // Changed to Notes icon
-                    color: _currentIndex == 2 ? kAccentGreen : kSecondaryTextColor),
-                onPressed: () => setState(() => _currentIndex = 2),
-              ),
-              IconButton(
-                icon: Icon(Icons.person_outline,
-                    color: _currentIndex == 3 ? kAccentGreen : kSecondaryTextColor),
-                onPressed: () => setState(() => _currentIndex = 3),
+                icon: Icon(Icons.history_rounded, 
+                  color: _selectedIndex == 1 ? kPrimaryTeal : kTextGrey, size: 28),
+                onPressed: () => _onItemTapped(1),
               ),
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-// ==================== NEW MINIMAL HOME PAGE ====================
-
-class HomePage extends StatelessWidget {
-  const HomePage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ListView(
-        padding: const EdgeInsets.all(24.0),
-        children: [
-          // 1. Top Bar
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const CircleAvatar(
-                radius: 20,
-                backgroundColor: kCardGlass,
-                backgroundImage: NetworkImage('https://i.pravatar.cc/150?img=32'), // Placeholder
-              ),
-              const Icon(Icons.settings_outlined, color: Colors.white),
-            ],
-          ),
-          
-          const SizedBox(height: 24),
-          
-          // 2. Greeting
-          const Text(
-            "Hi Abhijith,",
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.w300, color: kSecondaryTextColor),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            "How can I assist you today?",
-            style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: kTextColor),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 3. Central AI Orb (Clean, subtle gradient, no neon bloom)
-          Center(
-            child: Container(
-              height: 180,
-              width: 180,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: LinearGradient(
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                  colors: [
-                    kAccentGreen.withOpacity(0.8),
-                    kPrimaryTeal.withOpacity(0.6),
-                  ],
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: kPrimaryTeal.withOpacity(0.2),
-                    blurRadius: 40,
-                    spreadRadius: 0,
-                  )
-                ],
-              ),
-            ),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 4. Quick Action Chips (Updated List)
-          // Removed: OCR Scan, Mood Check
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildGlassChip(Icons.edit_note, "Smart Notes"),
-                const SizedBox(width: 12),
-                _buildGlassChip(Icons.mic_none, "Voice Notes"),
-                const SizedBox(width: 12),
-                _buildGlassChip(Icons.search, "Smart Search"),
-                const SizedBox(width: 12),
-                _buildGlassChip(Icons.calendar_today, "Daily Planner"),
-                const SizedBox(width: 12),
-                _buildGlassChip(Icons.notifications_none, "Reminders"),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 5. Today's Overview (Carousel)
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text("Today's Overview",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-              const Icon(Icons.arrow_forward, size: 16, color: kSecondaryTextColor),
-            ],
-          ),
-          const SizedBox(height: 16),
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                _buildOverviewCard("Important", "Project Submission", "Due 5:00 PM", Icons.warning_amber),
-                const SizedBox(width: 16),
-                _buildOverviewCard("Meeting", "Team Sync", "10:00 AM", Icons.videocam_outlined),
-                const SizedBox(width: 16),
-                _buildOverviewCard("Habit", "Drink Water", "6/8 Cups", Icons.local_drink_outlined),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 40),
-
-          // 6. Suggested For You (Rich Cards)
-          const Text("Suggested For You",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600)),
-          const SizedBox(height: 16),
-          _buildRichCard("Productivity Tip", "Focus on one task at a time for better flow.", Icons.lightbulb_outline),
-          const SizedBox(height: 12),
-          _buildRichCard("Health Insight", "Your sleep quality improved by 10% this week.", Icons.favorite_border),
-          
-          const SizedBox(height: 80), // Bottom padding
-        ],
-      ),
-    );
-  }
-
-  // Helper: Glassmorphism Chip
-  Widget _buildGlassChip(IconData icon, String label) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.05), // Low opacity for glass feel
-        borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: Colors.white.withOpacity(0.1)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, color: kAccentGreen, size: 18),
-          const SizedBox(width: 8),
-          Text(label, style: const TextStyle(color: kTextColor, fontSize: 13)),
-        ],
-      ),
-    );
-  }
-
-  // Helper: Overview Card (Vertical)
-  Widget _buildOverviewCard(String type, String title, String subtitle, IconData icon) {
-    return Container(
-      width: 140,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: kCardGlass,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.05),
-              shape: BoxShape.circle,
-            ),
-            child: Icon(icon, color: kPrimaryTeal, size: 20),
-          ),
-          const SizedBox(height: 16),
-          Text(type, style: const TextStyle(color: kSecondaryTextColor, fontSize: 12)),
-          const SizedBox(height: 4),
-          Text(title, 
-              style: const TextStyle(color: kTextColor, fontWeight: FontWeight.w600, fontSize: 14),
-              maxLines: 1, overflow: TextOverflow.ellipsis),
-          const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(color: kSecondaryTextColor, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-
-  // Helper: Rich Card (Horizontal)
-  Widget _buildRichCard(String title, String subtitle, IconData icon) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [kCardGlass, kCardGlass.withOpacity(0.8)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: kAccentGreen.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Icon(icon, color: kAccentGreen, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                const SizedBox(height: 4),
-                Text(subtitle, style: const TextStyle(color: kSecondaryTextColor, fontSize: 13, height: 1.4)),
-              ],
-            ),
-          ),
-        ],
       ),
     );
   }
