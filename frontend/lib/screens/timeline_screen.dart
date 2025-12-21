@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import '../main.dart'; // Imports your global theme colors
+import 'package:shared_preferences/shared_preferences.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key});
@@ -20,13 +21,19 @@ class _TimelineScreenState extends State<TimelineScreen> {
     fetchMemories();
   }
 
+
   Future<void> fetchMemories() async {
-    // We fetch data for 'test_user' because that is what generate_dummy_data.py created.
-    // In a real app, you would use the logged-in user's ID here.
-    final url = Uri.parse('http://10.0.2.2:8000/memories?user_id=test_user');
-    
-    try {
-      final response = await http.get(url);
+  // 1. Get the real User ID
+  final prefs = await SharedPreferences.getInstance();
+  final userId = prefs.getString('user_id');
+
+  if (userId == null) return; // Should not happen if logged in
+
+  // 2. Use it in the URL
+  final url = Uri.parse('http://10.0.2.2:8000/memories?user_id=$userId');
+  
+  try {
+    final response = await http.get(url);
       
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -43,6 +50,8 @@ class _TimelineScreenState extends State<TimelineScreen> {
       setState(() => isLoading = false);
     }
   }
+
+
 
   @override
   Widget build(BuildContext context) {

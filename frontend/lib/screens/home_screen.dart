@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:intl/intl.dart'; // Add intl to pubspec.yaml if missing
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../main.dart'; 
-
+import 'login_screen.dart';
+import 'chat_screen.dart'; // Import Chat Screen
+import 'voice_mode_screen.dart';
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -12,8 +15,7 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  // State Variables
-  String userName = "Abhijit"; // Placeholder until profile fetch
+  String userName = "Guest"; 
   List<dynamic> todayEvents = [];
   Map<String, dynamic>? aiPrediction;
   bool isLoading = true;
@@ -21,12 +23,23 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    _loadDashboardData();
+    _loadUserAndData();
   }
 
-  Future<void> _loadDashboardData() async {
-    // 1. Fetch Full Timeline to filter for TODAY
-    final timelineUrl = Uri.parse('http://10.0.2.2:8000/memories?user_id=test_user');
+  Future<void> _loadUserAndData() async {
+    final prefs = await SharedPreferences.getInstance();
+    final String? userId = prefs.getString('user_id');
+
+    if (userId == null) {
+      _logout();
+      return;
+    }
+
+    setState(() {
+      userName = userId;
+    });
+
+    final timelineUrl = Uri.parse('http://10.0.2.2:8000/memories?user_id=$userId');
     
     try {
       final response = await http.get(timelineUrl);
@@ -34,21 +47,17 @@ class _HomeScreenState extends State<HomeScreen> {
         final data = json.decode(response.body);
         final List<dynamic> allItems = data['timeline'];
         
-        // Filter: Get only EVENTS that happen TODAY
         final now = DateTime.now();
         final String todayStr = DateFormat('yyyy-MM-dd').format(now);
         
         setState(() {
           todayEvents = allItems.where((item) {
             if (item['type'] != 'event') return false;
-            // Check if date matches today
             return item['start_time'].toString().startsWith(todayStr);
           }).toList();
         });
 
-        // 2. Get AI Prediction based on the LAST event
         if (allItems.isNotEmpty) {
-           // Find the most recent completed event to use as context
            var lastEvent = allItems.firstWhere(
              (i) => i['type'] == 'event', 
              orElse: () => {'category': 'Sleep'}
@@ -64,7 +73,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _fetchAIPrediction(String prevActivity) async {
-    // We send current context to the AI Brain
     final predictUrl = Uri.parse(
       'http://10.0.2.2:8000/predict?previous_activity=$prevActivity&current_location=Home&current_fatigue=Low'
     );
@@ -75,12 +83,24 @@ class _HomeScreenState extends State<HomeScreen> {
         final data = json.decode(response.body);
         if (data['predictions'] != null && data['predictions'].isNotEmpty) {
           setState(() {
-            aiPrediction = data['predictions'][0]; // Take the top suggestion
+            aiPrediction = data['predictions'][0];
           });
         }
       }
     } catch (e) {
       print("Prediction Error: $e");
+    }
+  }
+
+  void _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.clear();
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (context) => const LoginScreen()),
+        (route) => false, 
+      );
     }
   }
 
@@ -103,32 +123,93 @@ class _HomeScreenState extends State<HomeScreen> {
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("Hello, $userName", style: const TextStyle(color: kTextGrey, fontSize: 16)),
+                          const Text("Welcome Back,", style: TextStyle(color: kTextGrey, fontSize: 16)),
                           const SizedBox(height: 4),
-                          const Text("Your Day Overview", style: TextStyle(color: kTextWhite, fontSize: 24, fontWeight: FontWeight.bold)),
+                          Text(userName, style: const TextStyle(color: kTextWhite, fontSize: 24, fontWeight: FontWeight.bold)),
                         ],
                       ),
-                      const CircleAvatar(
-                        backgroundColor: kCardDark,
-                        child: Icon(Icons.person, color: kPrimaryTeal),
+                      PopupMenuButton<String>(
+                        onSelected: (value) {
+                          if (value == 'logout') _logout();
+                        },
+                        color: kCardDark,
+                        child: const CircleAvatar(
+                          backgroundColor: kCardDark,
+                          radius: 24,
+                          child: Icon(Icons.person, color: kPrimaryTeal, size: 30),
+                        ),
+                        itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+                          const PopupMenuItem<String>(
+                            value: 'logout',
+                            child: Row(
+                              children: [
+                                Icon(Icons.logout, color: Colors.redAccent),
+                                SizedBox(width: 10),
+                                Text("Logout", style: TextStyle(color: Colors.redAccent)),
+                              ],
+                            ),
+                          ),
+                        ],
                       )
                     ],
                   ),
                   const SizedBox(height: 24),
 
-                  // --- AI BRAIN CARD ---
+                  // --- AI PREDICTION CARD ---
                   _buildAIPredictionCard(),
                   
                   const SizedBox(height: 24),
 
-                  // --- STATS ROW ---
+                  // --- 🆕 ACTION BUTTONS ROW (Chat, Voice, Log) ---
+                  const Text("Quick Actions", style: TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 12),
                   Row(
                     children: [
-                      Expanded(child: _buildStatCard("Pending", "${todayEvents.length}", Icons.assignment_outlined, Colors.orange)),
+                      Expanded(
+                        child: _buildActionCard(
+                          label: "Voice Mode", 
+                          icon: Icons.mic_none_outlined, 
+                          color: Colors.purpleAccent,
+                          // ✅ CHANGE THIS LINE:
+                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const VoiceModeScreen())),
+                        ),
+                      ),
                       const SizedBox(width: 12),
-                      Expanded(child: _buildStatCard("Focus", "4.5h", Icons.timer, Colors.blue)),
+                      Expanded(
+                        child: _buildActionCard(
+                          label: "Voice Mode", 
+                          icon: Icons.mic_none_outlined, 
+                          color: Colors.purpleAccent,
+                          // For now, Voice also opens ChatScreen, but we could separate it later
+                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (context) => const ChatScreen())),
+                        ),
+                      ),
                       const SizedBox(width: 12),
-                      Expanded(child: _buildStatCard("Energy", "High", Icons.bolt, Colors.yellow)),
+                      Expanded(
+                        child: _buildActionCard(
+                          label: "Log Event", 
+                          icon: Icons.edit_note, 
+                          color: Colors.orangeAccent,
+                          onTap: () {
+                             ScaffoldMessenger.of(context).showSnackBar(
+                               const SnackBar(content: Text("Quick Log feature coming soon!"))
+                             );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 30),
+
+                  // --- STATS ROW (Kept for Dashboard Info) ---
+                  Row(
+                    children: [
+                      Expanded(child: _buildStatCard("Pending", "${todayEvents.length}", Icons.assignment_outlined, kTextGrey)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildStatCard("Focus", "4.5h", Icons.timer, kTextGrey)),
+                      const SizedBox(width: 12),
+                      Expanded(child: _buildStatCard("Energy", "High", Icons.bolt, kTextGrey)),
                     ],
                   ),
 
@@ -141,7 +222,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   todayEvents.isEmpty 
                     ? _buildEmptyState()
                     : ListView.builder(
-                        shrinkWrap: true, // Important for usage inside ScrollView
+                        shrinkWrap: true, 
                         physics: const NeverScrollableScrollPhysics(),
                         itemCount: todayEvents.length,
                         itemBuilder: (context, index) => _buildScheduleItem(todayEvents[index]),
@@ -153,7 +234,54 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // --- WIDGETS ---
+  // --- 🆕 NEW ACTION CARD WIDGET ---
+  Widget _buildActionCard({
+    required String label, 
+    required IconData icon, 
+    required Color color, 
+    required VoidCallback onTap
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        height: 100, // Fixed height for square look
+        decoration: BoxDecoration(
+          color: kCardDark,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: color.withOpacity(0.2)),
+          boxShadow: [
+            BoxShadow(
+              color: color.withOpacity(0.1),
+              blurRadius: 10,
+              offset: const Offset(0, 4),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 28),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              label, 
+              style: const TextStyle(
+                color: kTextWhite, 
+                fontWeight: FontWeight.bold, 
+                fontSize: 14
+              )
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   Widget _buildAIPredictionCard() {
     return Container(
@@ -188,14 +316,14 @@ class _HomeScreenState extends State<HomeScreen> {
           Text(
             aiPrediction != null 
               ? "Based on your habits, you usually '${aiPrediction!['activity']}' now."
-              : "Analyzing your patterns...",
+              : "No data found for $userName.",
             style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 8),
-          Text(
+           Text(
             aiPrediction != null 
               ? "${(aiPrediction!['probability'] * 100).toStringAsFixed(0)}% Confidence"
-              : "Gathering data from timeline...",
+              : "Interact with the app to train your brain.",
             style: TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 14),
           ),
         ],
@@ -203,19 +331,19 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  // Simplified Stat Card (Non-clickable)
   Widget _buildStatCard(String label, String value, IconData icon, Color color) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 12),
+      padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 8),
       decoration: BoxDecoration(
-        color: kCardDark,
+        color: kCardDark.withOpacity(0.5), // Slightly darker to differentiate
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(
         children: [
-          Icon(icon, color: color, size: 28),
+          Icon(icon, color: color, size: 24),
           const SizedBox(height: 8),
-          Text(value, style: const TextStyle(color: kTextWhite, fontSize: 18, fontWeight: FontWeight.bold)),
+          Text(value, style: const TextStyle(color: kTextWhite, fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 4),
           Text(label, style: const TextStyle(color: kTextGrey, fontSize: 12)),
         ],
@@ -259,7 +387,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.only(top: 20),
-        child: Text("No events scheduled for today.", style: TextStyle(color: kTextGrey.withOpacity(0.5))),
+        child: Text("No events today for $userName.", style: TextStyle(color: kTextGrey.withOpacity(0.5))),
       ),
     );
   }

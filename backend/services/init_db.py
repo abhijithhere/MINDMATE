@@ -1,126 +1,105 @@
 import sqlite3
 import os
-from services.db import get_db
+
+# Define path to the database
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_PATH = os.path.join(BASE_DIR, "db", "mindmate.db")
+
+def get_db_connection():
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+    return sqlite3.connect(DB_PATH)
 
 def init_db():
-    conn = get_db()
+    conn = get_db_connection()
     cur = conn.cursor()
-
-    # 1. USERS - Core Identity (CORRECTED with Password)
+    
+    # 1. USERS TABLE (New!)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id TEXT PRIMARY KEY,
-        email TEXT,
-        password_hash TEXT NOT NULL, -- ✅ The critical column
-        settings_json TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            password_hash TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
     """)
 
-    # 2. LOCATIONS - Places
+    # 2. EVENTS TABLE
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS locations (
-        location_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        name TEXT NOT NULL,
-        address TEXT,
-        latitude REAL,
-        longitude REAL,
-        is_confirmed BOOLEAN DEFAULT 0,
-        FOREIGN KEY(user_id) REFERENCES users(user_id)
-    );
+        CREATE TABLE IF NOT EXISTS events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            title TEXT,
+            category TEXT,
+            start_time TEXT,
+            end_time TEXT,
+            location_id INTEGER,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
     """)
 
-    # 3. EVENTS - Time-based actions
+    # 3. MEMORIES TABLE
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS events (
-        event_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        title TEXT NOT NULL,
-        category TEXT,
-        start_time TEXT NOT NULL,
-        end_time TEXT,
-        location_id INTEGER,
-        is_completed BOOLEAN DEFAULT 0,
-        FOREIGN KEY(user_id) REFERENCES users(user_id),
-        FOREIGN KEY(location_id) REFERENCES locations(location_id)
-    );
+        CREATE TABLE IF NOT EXISTS memories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            memory_type TEXT,
+            content TEXT,
+            confidence_score REAL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_reinforced DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
     """)
 
-    # 4. REMINDERS - Notifications
+    # 4. CHAT MESSAGES TABLE (New!)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS reminders (
-        reminder_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        event_id INTEGER,
-        user_id TEXT NOT NULL,
-        trigger_time TEXT NOT NULL,
-        recurrence_rule TEXT,
-        priority_level TEXT,
-        hard_vs_soft TEXT,
-        is_active BOOLEAN DEFAULT 1,
-        FOREIGN KEY(event_id) REFERENCES events(event_id),
-        FOREIGN KEY(user_id) REFERENCES users(user_id)
-    );
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            sender TEXT,  -- 'user' or 'ai'
+            text TEXT,
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
     """)
 
-    # 5. MEMORIES - Conceptual Facts
+    # 5. LOCATIONS TABLE
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS memories (
-        memory_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        memory_type TEXT,
-        content TEXT NOT NULL,
-        confidence_score REAL DEFAULT 0.5,
-        last_reinforced TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(user_id) REFERENCES users(user_id)
-    );
-    """)
-
-    # 6. HABITS - Derived Patterns
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS habits (
-        habit_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        activity_name TEXT NOT NULL,
-        time_window_start TEXT,
-        time_window_end TEXT,
-        frequency_count INTEGER DEFAULT 1,
-        stability_score REAL DEFAULT 0.0,
-        FOREIGN KEY(user_id) REFERENCES users(user_id)
-    );
-    """)
-
-    # 7. VOICE_ANALYSIS - Input Metadata
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS voice_analysis (
-        analysis_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        associated_event_id INTEGER, 
-        original_transcript TEXT,
-        emotion_label TEXT,
-        stress_level REAL,
-        speaking_rate REAL,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY(associated_event_id) REFERENCES events(event_id)
-    );
-    """)
-
-    # 8. FEEDBACK - User Corrections
-    cur.execute("""
-    CREATE TABLE IF NOT EXISTS feedback (
-        feedback_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        user_id TEXT NOT NULL,
-        target_id INTEGER,
-        target_table TEXT,
-        action_type TEXT,
-        user_comment TEXT,
-        created_at TEXT DEFAULT CURRENT_TIMESTAMP
-    );
+        CREATE TABLE IF NOT EXISTS locations (
+            location_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            name TEXT
+        )
     """)
     
+    # 6. REMINDERS TABLE
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id INTEGER,
+            user_id TEXT,
+            trigger_time TEXT,
+            recurrence_rule TEXT,
+            priority_level TEXT,
+            FOREIGN KEY(event_id) REFERENCES events(id)
+        )
+    """)
+
+    # 7. VOICE ANALYSIS TABLE
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS voice_analysis (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            associated_event_id INTEGER,
+            original_transcript TEXT,
+            emotion_label TEXT,
+            stress_level REAL,
+            FOREIGN KEY(associated_event_id) REFERENCES events(id)
+        )
+    """)
+
     conn.commit()
     conn.close()
-    print("✅ Database initialized with Correct Architecture.")
+    print("✅ Database tables initialized successfully.")
 
 if __name__ == "__main__":
     init_db()

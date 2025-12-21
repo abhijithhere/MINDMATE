@@ -1,53 +1,124 @@
-import os
-import json
-import datetime
-import google.generativeai as genai
-from dotenv import load_dotenv
+import re
+from datetime import datetime, timedelta
+from dateutil import parser
 
-# Load API Key from .env file
-load_dotenv()
-api_key = os.getenv("GEMINI_API_KEY")
-if not api_key:
-    print("⚠️ WARNING: GEMINI_API_KEY not found in .env")
-else:
-    genai.configure(api_key=api_key)
-
-def extract_metadata(text: str):
-    """Uses Gemini to categorize text into Event, Note, or Reminder."""
-    print(f"\n[NLP] Analyzing: '{text}'")
-    if not text: return {}
-
-    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-    
-    prompt = f"""
-    Current Time: {now}
-    User Input: "{text}"
-    
-    Analyze the input and return a JSON object with these keys (use null if not applicable):
-    
-    1. "event": For specific actions with a time.
-       Fields: title, category (Work/Personal/Health), start_time (YYYY-MM-DD HH:MM), location_name
-    
-    2. "reminder": For tasks needing a notification.
-       Fields: priority (High/Med/Low), recurrence (DAILY/WEEKLY/null)
-    
-    3. "memory": For facts, preferences, or ideas.
-       Fields: type (preference/fact/goal), content (summarized), confidence (0.0-1.0)
-    
-    4. "voice_meta": Sentiment analysis.
-       Fields: emotion_label (neutral/happy/stressed), stress_level (0.0-1.0)
-
-    Return ONLY Raw JSON. No markdown formatting.
+def analyze_sentiment(text):
     """
+    Simple rule-based sentiment/stress detection.
+    Returns: (emotion_label, stress_level)
+    """
+    text = text.lower()
+    stress_keywords = ["tired", "exhausted", "stressed", "busy", "deadline", "anxious", "angry"]
+    happy_keywords = ["happy", "great", "good", "excited", "love", "done", "accomplished"]
+    
+    stress_score = 0.0
+    for word in stress_keywords:
+        if word in text:
+            stress_score += 0.3
+            
+    if stress_score > 0.6:
+        return "negative", min(stress_score, 1.0)
+    elif any(word in text for word in happy_keywords):
+        return "positive", 0.0
+    else:
+        return "neutral", 0.1
 
+def extract_datetime(text):
+    """
+    Attempts to extract a date/time from the text.
+    Defaults to 'Now' if nothing specific is found.
+    """
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        response = model.generate_content(prompt)
+        # Quick heuristic for "tomorrow"
+        if "tomorrow" in text.lower():
+            dt = datetime.now() + timedelta(days=1)
+            # Try to find a specific time like "at 5 pm"
+            time_match = re.search(r'at (\d{1,2})(:(\d{2}))?\s*(am|pm)?', text.lower())
+            if time_match:
+                # Let dateutil handle the specific parsing of the time string
+                # We combine the tomorrow date with the time string found
+                return parser.parse(time_match.group(0), default=dt).isoformat()
+            
+            # Default to 9 AM tomorrow if no time specified
+            return dt.replace(hour=9, minute=0, second=0).isoformat()
         
-        # Clean the response text to ensure valid JSON
-        raw_text = response.text.replace("```json", "").replace("```", "").strip()
-        return json.loads(raw_text)
+        # Heuristic for "today at..."
+        if "at " in text.lower():
+            return parser.parse(text, fuzzy=True).isoformat()
+            
+    except:
+        pass
+    
+    # Fallback: Return current time
+    return datetime.now().isoformat()
 
-    except Exception as e:
-        print(f"❌ NLP Error: {e}")
-        return {}
+def extract_metadata(text):
+    """
+    Parses text to determine if it is a Memory, Event, or Reminder.
+    """
+    if not text: return {}
+    text_lower = text.lower()
+    
+    response_data = {}
+    
+    # 1. Voice Meta (Emotion)
+    emotion, stress = analyze_sentiment(text)
+    response_data["voice_meta"] = {"emotion_label": emotion, "stress_level": stress}
+
+    # 2. KEYWORD LISTS
+    event_keywords = ["schedule", "meeting", "appointment", "go to", "plan", "remind me", "have a"]
+    
+    # CASE A: EVENT / REMINDER
+    if any(x in text_lower for x in event_keywords):
+        start_time = extract_datetime(text)
+        
+        # Clean title: Remove "Remind me to" or "I have a"
+        clean_title = text
+        for phrase in ["remind me to", "i have a", "schedule a", "plan a"]:
+            if phrase in text_lower:
+                clean_title = text_lower.split(phrase, 1)[1].strip()
+        
+        # Construct Event
+        response_data["event"] = {
+            "title": clean_title.capitalize(),
+            "category": "Work" if "meeting" in text_lower else "Personal",
+            "start_time": start_time,
+            "location_name": "Office" if "meeting" in text_lower else "Home"
+        }
+        
+        # Construct Reminder
+        response_data["reminder"] = {
+            "recurrence": None,
+            "priority": "High" if "urgent" in text_lower else "Medium"
+        }
+        
+    # CASE B: MEMORY (Fallback)
+    else:
+        response_data["memory"] = {
+            "type": "diary",
+            "content": text,
+            "confidence": 0.5
+        }
+
+    return response_data
+
+def detect_retrieval_intent(text):
+    text = text.lower()
+    # Check keywords
+    if any(x in text for x in ["schedule", "plan", "events", "calendar"]):
+        target_date = datetime.now()
+        display = "today"
+        
+        if "tomorrow" in text:
+            target_date = target_date + timedelta(days=1)
+            display = "tomorrow"
+        elif "yesterday" in text:
+            target_date = target_date - timedelta(days=1)
+            display = "yesterday"
+            
+        return {
+            "intent": "get_schedule",
+            "date_str": target_date.strftime("%Y-%m-%d"),
+            "display_date": display
+        }
+    return None

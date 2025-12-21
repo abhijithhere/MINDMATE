@@ -5,52 +5,21 @@ import os
 import uvicorn
 import sqlite3
 from datetime import datetime
-from passlib.context import CryptContext
 from pydantic import BaseModel
+from passlib.context import CryptContext 
 
 # --- IMPORTS (Ensure these exist in your project) ---
 from app.stt import transcribe_file
-from app.nlp import extract_metadata
-from services.events import save_voice_entry
 from services.init_db import init_db
 from services.db import get_db
+from services.analytics import get_daily_summary
 from services.model import MindMateModel 
+from app.nlp import extract_metadata, detect_retrieval_intent
+from services.events import save_voice_entry, get_schedule_for_date
 
 app = FastAPI(title="MindMate API")
 
-@app.get("/memories")
-async def get_memories(user_id: str):
-    conn = get_db()
-    conn.row_factory = sqlite3.Row
-    cur = conn.cursor()
-    
-    # Fetch Events
-    cur.execute("""
-        SELECT title, category, start_time, 'event' as type 
-        FROM events 
-        WHERE user_id = ? 
-        ORDER BY start_time DESC
-    """, (user_id,))
-    events = [dict(row) for row in cur.fetchall()]
-    
-    # Fetch Memories (✅ FIXED: Changed 'created_at' to 'last_reinforced')
-    cur.execute("""
-        SELECT content, memory_type as category, last_reinforced as start_time, 'memory' as type 
-        FROM memories 
-        WHERE user_id = ? 
-        ORDER BY last_reinforced DESC
-    """, (user_id,))
-    memories = [dict(row) for row in cur.fetchall()]
-    
-    conn.close()
-    
-    timeline = events + memories
-    # Sort mixed list by time (newest first)
-    timeline.sort(key=lambda x: x['start_time'], reverse=True)
-    
-    return {"timeline": timeline}
-
-# --- CORS (Important for Mobile App connection) ---
+# --- CORS ---
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -59,21 +28,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- SECURITY CONFIG ---
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+ml_brain = None
 
+# --- MODELS ---
+class UserAuth(BaseModel):
+    user_id: str
+    password: str
+
+class ChatMessage(BaseModel):
+    user_id: str
+    text: str
+    sender: str  # 'user' or 'ai'
+
+# --- HELPERS ---
 def get_password_hash(password):
     return pwd_context.hash(password)
 
 def verify_password(plain_password, hashed_password):
     return pwd_context.verify(plain_password, hashed_password)
-
-class UserAuth(BaseModel):
-    user_id: str
-    password: str
-
-# --- GLOBAL ML BRAIN ---
-ml_brain = None
 
 # 1. STARTUP EVENT
 @app.on_event("startup")
@@ -117,7 +90,7 @@ async def login(user: UserAuth):
     finally:
         conn.close()
 
-# 3. MEMORY ENDPOINT (MISSING BEFORE!)
+# 3. MEMORY ENDPOINT
 @app.get("/memories")
 async def get_memories(user_id: str):
     conn = get_db()
@@ -133,12 +106,12 @@ async def get_memories(user_id: str):
     """, (user_id,))
     events = [dict(row) for row in cur.fetchall()]
     
-    # Fetch Memories
+    # Fetch Memories (Using the FIXED version with last_reinforced)
     cur.execute("""
-        SELECT content, memory_type as category, created_at as start_time, 'memory' as type 
+        SELECT content, memory_type as category, last_reinforced as start_time, 'memory' as type 
         FROM memories 
         WHERE user_id = ? 
-        ORDER BY created_at DESC
+        ORDER BY last_reinforced DESC
     """, (user_id,))
     memories = [dict(row) for row in cur.fetchall()]
     
@@ -152,33 +125,21 @@ async def get_memories(user_id: str):
 
 # 4. AUDIO UPLOAD
 @app.post("/upload-audio")
-async def upload_audio(
-    file: UploadFile = File(...),
-    user_id: str = Form(...) 
-):
+async def upload_audio(file: UploadFile = File(...), user_id: str = Form(...)):
     temp_filename = f"temp_{file.filename}"
     try:
         with open(temp_filename, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        print(f"🎤 Processing audio for: {user_id}")
         text = transcribe_file(temp_filename)
-        
-        if not text:
-            return {"status": "error", "message": "No speech detected"}
+        if not text: return {"status": "error", "message": "No speech detected"}
 
-        analysis = extract_metadata(text)
-        save_voice_entry(user_id, text, analysis)
-
-        return {"status": "success", "transcript": text, "data": analysis}
-    except Exception as e:
-        print(f"❌ Error: {e}")
-        return {"status": "error", "message": str(e)}
+        # We don't save here anymore; saving happens in /chat/send
+        return {"status": "success", "transcript": text}
     finally:
-        if os.path.exists(temp_filename):
-            os.remove(temp_filename)
+        if os.path.exists(temp_filename): os.remove(temp_filename)
 
-# 5. PREDICTION ENDPOINT
+# 5. PREDICTION & ANALYTICS
 @app.post("/predict")
 async def predict_next(
     previous_activity: str,
@@ -227,7 +188,6 @@ async def get_period_overview(user_id: str, start_date: str, end_date: str):
             
     return {"stats": stats, "total_tracked_hours": total_hours}
 
-# 7. PREDICT FUTURE TIMETABLE
 @app.get("/predict/schedule")
 async def get_ai_schedule(date: str):
     if not ml_brain:
@@ -236,6 +196,82 @@ async def get_ai_schedule(date: str):
     # Generate schedule for the requested date
     timetable = ml_brain.suggest_daily_schedule(date)
     return {"date": date, "suggested_schedule": timetable}
+
+# 6. CHAT ENDPOINTS
+@app.get("/chat/history")
+async def get_chat_history(user_id: str):
+    conn = get_db()
+    conn.row_factory = sqlite3.Row
+    cur = conn.cursor()
+    
+    cur.execute("SELECT sender, text, timestamp FROM chat_messages WHERE user_id = ? ORDER BY timestamp ASC", (user_id,))
+    rows = [dict(row) for row in cur.fetchall()]
+    conn.close()
+    
+    return {"messages": rows}
+
+@app.post("/chat/send")
+async def send_chat_message(message: ChatMessage):
+    conn = get_db()
+    cur = conn.cursor()
+    
+    # 1. SAVE USER MESSAGE & COMMIT IMMEDIATELY
+    # We save right away so the DB is free for the next function to use
+    cur.execute("INSERT INTO chat_messages (user_id, sender, text) VALUES (?, ?, ?)", 
+                (message.user_id, 'user', message.text))
+    conn.commit() 
+    
+    ai_text = ""
+
+    # 2. CHECK INTENT (Now safe to call other DB functions)
+    
+    # A. RETRIEVAL (Checking Schedule)
+    retrieval = detect_retrieval_intent(message.text)
+    if retrieval and retrieval['intent'] == 'get_schedule':
+        events = get_schedule_for_date(message.user_id, retrieval['date_str'])
+        if events:
+            ai_text = f"Here is your schedule for {retrieval['display_date']}:\n" + "\n".join(events)
+        else:
+            ai_text = f"You have no events scheduled for {retrieval['display_date']}."
+
+    # B. CREATION (Scheduling/Reminding)
+    elif any(x in message.text.lower() for x in ["schedule", "remind", "meeting", "have a", "plan"]):
+        analysis = extract_metadata(message.text)
+        # This function opens its own connection, which is fine now because we committed above!
+        save_success = save_voice_entry(message.user_id, message.text, analysis)
+        
+        if save_success and "event" in analysis:
+            evt = analysis["event"]
+            ai_text = f"✅ Done. I've scheduled '{evt['title']}' for {evt['start_time'].split('T')[1][:5]}."
+        else:
+            ai_text = "I tried to save that, but something went wrong."
+
+    # C. GREETINGS
+    elif "hello" in message.text.lower():
+        ai_text = "Hello! I am ready to help you plan."
+        
+    # D. DEFAULT
+    else:
+        ai_text = f"I noted that. Saved to memory."
+        analysis = extract_metadata(message.text)
+        save_voice_entry(message.user_id, message.text, analysis)
+
+    # 3. SAVE AI RESPONSE
+    # We use the existing connection for the final save
+    cur.execute("INSERT INTO chat_messages (user_id, sender, text) VALUES (?, ?, ?)", 
+                (message.user_id, 'ai', ai_text))
+    
+    conn.commit()
+    conn.close()
+    
+    return {"status": "success", "ai_response": ai_text}
+@app.get("/dashboard")
+async def get_dashboard(user_id: str):
+    """
+    Returns the daily summary card for the home screen.
+    """
+    summary = get_daily_summary(user_id)
+    return summary
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)

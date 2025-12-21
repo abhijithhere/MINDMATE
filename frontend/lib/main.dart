@@ -6,6 +6,8 @@ import 'screens/home_screen.dart';
 import 'screens/timeline_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/planner_screen.dart';
+import 'screens/chat_screen.dart';
+
 // --- CUSTOM COLORS ---
 const Color kBackgroundDark = Color(0xFF121212);
 const Color kCardDark = Color(0xFF1E1E1E);
@@ -95,51 +97,11 @@ class _MainLayoutState extends State<MainLayout> {
 
   // ✅ FIX: The missing function is added here
   void _openVoiceOrb() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) => Container(
-        height: 350,
-        decoration: BoxDecoration(
-          color: kCardDark,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-          border: Border(top: BorderSide(color: kPrimaryTeal.withOpacity(0.5), width: 1)),
-          boxShadow: [
-            BoxShadow(color: kPrimaryTeal.withOpacity(0.2), blurRadius: 20, spreadRadius: 5)
-          ],
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            // Glowing Orb Animation Placeholder
-            Container(
-              height: 80,
-              width: 80,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: kPrimaryTeal,
-                boxShadow: [
-                  BoxShadow(color: kPrimaryTeal.withOpacity(0.6), blurRadius: 40, spreadRadius: 10)
-                ],
-              ),
-              child: const Icon(Icons.mic, size: 40, color: Colors.black),
-            ),
-            const SizedBox(height: 30),
-            const Text(
-              "Listening...",
-              style: TextStyle(color: kTextWhite, fontSize: 22, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 10),
-            const Text(
-              "Say 'Add a memory' or 'Schedule a meeting'",
-              style: TextStyle(color: kTextGrey, fontSize: 14),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+  Navigator.push(
+    context, 
+    MaterialPageRoute(builder: (context) => const ChatScreen())
+  );
+}
 
   @override
   Widget build(BuildContext context) {
