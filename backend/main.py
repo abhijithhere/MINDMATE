@@ -16,6 +16,8 @@ from services.analytics import get_daily_summary
 from services.model import MindMateModel 
 from app.nlp import extract_metadata, detect_retrieval_intent
 from services.events import save_voice_entry, get_schedule_for_date
+from app.advanced_nlp import IntentAnalyzer
+
 
 app = FastAPI(title="MindMate API")
 
@@ -31,7 +33,7 @@ app.add_middleware(
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 ml_brain = None
 
-# --- MODELS ---
+intent_analyzer = IntentAnalyzer()# --- MODELS ---
 class UserAuth(BaseModel):
     user_id: str
     password: str
@@ -216,48 +218,70 @@ async def send_chat_message(message: ChatMessage):
     cur = conn.cursor()
     
     # 1. SAVE USER MESSAGE & COMMIT IMMEDIATELY
-    # We save right away so the DB is free for the next function to use
     cur.execute("INSERT INTO chat_messages (user_id, sender, text) VALUES (?, ?, ?)", 
                 (message.user_id, 'user', message.text))
     conn.commit() 
     
     ai_text = ""
 
-    # 2. CHECK INTENT (Now safe to call other DB functions)
-    
-    # A. RETRIEVAL (Checking Schedule)
-    retrieval = detect_retrieval_intent(message.text)
-    if retrieval and retrieval['intent'] == 'get_schedule':
-        events = get_schedule_for_date(message.user_id, retrieval['date_str'])
-        if events:
-            ai_text = f"Here is your schedule for {retrieval['display_date']}:\n" + "\n".join(events)
-        else:
-            ai_text = f"You have no events scheduled for {retrieval['display_date']}."
+    # 2. ANALYZE INTENT (The Traffic Cop)
+    # This decides IF we should act, before we decide HOW to act.
+    intent_result = intent_analyzer.analyze(message.text)
+    intent_type = intent_result['type']
 
-    # B. CREATION (Scheduling/Reminding)
-    elif any(x in message.text.lower() for x in ["schedule", "remind", "meeting", "have a", "plan"]):
+    print(f"DEBUG: NLP Analysis -> {intent_type} | Reason: {intent_result['reason']}")
+
+    # --- CASE A: HYPOTHETICAL / ASSUMPTION ---
+    # e.g., "Suppose I have a meeting..." -> IGNORE
+    if intent_type == 'assumption':
+        ai_text = "I understand that is a hypothetical situation ('Suppose/Imagine'), so I won't schedule it."
+
+    # --- CASE B: RETRIEVAL ---
+    # e.g., "When I said..." or "What is my schedule?"
+    elif intent_type == 'retrieval':
+        # Now we use the OLD nlp.py helper to find the specific DATES
+        retrieval_data = detect_retrieval_intent(message.text)
+        
+        # If the old logic fails to find a date, default to "today" or "tomorrow"
+        # But usually, it returns a valid dict if it's a schedule query.
+        if retrieval_data and retrieval_data['intent'] == 'get_schedule':
+            events = get_schedule_for_date(message.user_id, retrieval_data['date_str'])
+            if events:
+                ai_text = f"Here is your schedule for {retrieval_data['display_date']}:\n" + "\n".join(events)
+            else:
+                ai_text = f"You have no events scheduled for {retrieval_data['display_date']}."
+        else:
+            # Fallback if advanced NLP said "retrieval" but basic NLP couldn't find a date
+            ai_text = "I think you're asking for information, but I couldn't figure out which date to check."
+
+    # --- CASE C: VALID COMMAND ---
+    # e.g., "Remind me to call John" -> EXECUTE
+    elif intent_type == 'command':
+        # Now we use the OLD nlp.py to extract the TITLE and TIME
         analysis = extract_metadata(message.text)
-        # This function opens its own connection, which is fine now because we committed above!
         save_success = save_voice_entry(message.user_id, message.text, analysis)
         
         if save_success and "event" in analysis:
             evt = analysis["event"]
             ai_text = f"✅ Done. I've scheduled '{evt['title']}' for {evt['start_time'].split('T')[1][:5]}."
         else:
-            ai_text = "I tried to save that, but something went wrong."
+            ai_text = "I understood that as a command, but I had trouble saving the details."
 
-    # C. GREETINGS
-    elif "hello" in message.text.lower():
-        ai_text = "Hello! I am ready to help you plan."
-        
-    # D. DEFAULT
-    else:
-        ai_text = f"I noted that. Saved to memory."
-        analysis = extract_metadata(message.text)
-        save_voice_entry(message.user_id, message.text, analysis)
+    # --- CASE D: NOISE / CONVERSATION ---
+    # e.g., "He went to the store" or "Hello"
+    else: 
+        # Quick check for greetings
+        if "hello" in message.text.lower():
+            ai_text = "Hello! I am ready to help you plan."
+        else:
+            # It's just random conversation or noise.
+            # We log it to memory but don't schedule it.
+            ai_text = "I've noted that in your journal."
+            # Optional: You can still save this as a "thought" if you want
+            analysis = extract_metadata(message.text)
+            save_voice_entry(message.user_id, message.text, analysis)
 
     # 3. SAVE AI RESPONSE
-    # We use the existing connection for the final save
     cur.execute("INSERT INTO chat_messages (user_id, sender, text) VALUES (?, ?, ?)", 
                 (message.user_id, 'ai', ai_text))
     
@@ -265,6 +289,8 @@ async def send_chat_message(message: ChatMessage):
     conn.close()
     
     return {"status": "success", "ai_response": ai_text}
+
+
 @app.get("/dashboard")
 async def get_dashboard(user_id: str):
     """

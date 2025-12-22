@@ -27,3 +27,5 @@ flutter emulators --launch Pixel_6
 ## to run backedn
 
  uvicorn app.main:app --reload           
+
+  uvicorn main:app --reload --host 0.0.0.0 --port 8000      
