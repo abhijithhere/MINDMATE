@@ -1,124 +1,150 @@
+import json
+import requests
+import sqlite3
 import re
 from datetime import datetime, timedelta
-from dateutil import parser
+from services.db import get_db
+from services.gmail import fetch_recent_emails # 👈 IMPORT GMAIL
 
-def analyze_sentiment(text):
-    """
-    Simple rule-based sentiment/stress detection.
-    Returns: (emotion_label, stress_level)
-    """
-    text = text.lower()
-    stress_keywords = ["tired", "exhausted", "stressed", "busy", "deadline", "anxious", "angry"]
-    happy_keywords = ["happy", "great", "good", "excited", "love", "done", "accomplished"]
+# --- CONFIG ---
+OLLAMA_URL = "http://localhost:11434/api/generate"
+MODEL_NAME = "llama3.2"
+
+def get_db_safe():
+    return get_db()
+
+# --- 1. USER IDENTITY ---
+def get_user_background_summary(user_id: str):
+    conn = get_db_safe()
+    cur = conn.cursor()
+    profile_points = []
+    try:
+        cur.execute("SELECT title FROM events WHERE user_id = ? ORDER BY id DESC LIMIT 5", (user_id,))
+        recent_events = [row[0].lower() for row in cur.fetchall()]
+        if any("exam" in e or "lab" in e for e in recent_events):
+            profile_points.append("- User is likely a Student.")
+    except: pass
+    finally: conn.close()
+    return "\n".join(profile_points)
+
+# --- 2. SEARCH ENGINE ---
+def get_relevant_knowledge(user_id: str, text: str):
+    conn = get_db_safe()
+    cur = conn.cursor()
+    found_info = []
+    try:
+        words = re.findall(r'\w+', text.lower())
+        keywords = [w for w in words if len(w) > 3]
+        for word in keywords:
+            try:
+                cur.execute("SELECT content FROM memories WHERE user_id = ? AND content LIKE ? LIMIT 1", (user_id, f'%{word}%'))
+                for row in cur.fetchall(): found_info.append(f"- Memory: '{row[0]}'")
+            except: pass
+    except: pass
+    finally: conn.close()
+    return "\n".join(list(set(found_info)))
+
+# --- 3. CALENDAR ---
+def get_schedule_context(user_id: str):
+    context_lines = []
+    conn = get_db_safe()
+    cur = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    future = (datetime.now() + timedelta(hours=24)).strftime("%Y-%m-%d %H:%M")
+    try:
+        cur.execute("SELECT title, start_time FROM events WHERE user_id = ? AND start_time BETWEEN ? AND ?", (user_id, now, future))
+        events = cur.fetchall()
+        if events:
+            context_lines.append("📅 SCHEDULE (Next 24h):")
+            for e in events: context_lines.append(f"- {e[0]} at {e[1]}")
+        else:
+            context_lines.append("📅 SCHEDULE: No events in the next 24 hours.")
+    except: pass
+    finally: conn.close()
+    return "\n".join(context_lines)
+
+# --- 4. THE BRAIN (Now with Gmail!) ---
+def generate_conversational_response(user_id: str, user_text: str):
+    # Gather Context
+    user_profile = get_user_background_summary(user_id)
+    specific_knowledge = get_relevant_knowledge(user_id, user_text)
+    schedule_data = get_schedule_context(user_id)
+    current_time = datetime.now().strftime("%A, %Y-%m-%d %H:%M")
+
+    # 📧 CHECK GMAIL (The New Logic)
+    email_context = ""
+    # If the user mentions "email", "mail", "inbox", fetch data!
+    if any(w in user_text.lower() for w in ["email", "mail", "inbox", "message"]):
+        print("📧 DETECTED EMAIL REQUEST: Fetching from Gmail...")
+        email_data = fetch_recent_emails(limit=5)
+        email_context = f"\n📧 RECENT EMAILS:\n{email_data}\n"
+
+    system_prompt = f"""
+    You are MindMate, a smart personal assistant.
+    Current Time: {current_time}
     
-    stress_score = 0.0
-    for word in stress_keywords:
-        if word in text:
-            stress_score += 0.3
-            
-    if stress_score > 0.6:
-        return "negative", min(stress_score, 1.0)
-    elif any(word in text for word in happy_keywords):
-        return "positive", 0.0
-    else:
-        return "neutral", 0.1
+    👤 USER PROFILE:
+    {user_profile}
+    
+    📅 CALENDAR:
+    {schedule_data}
 
-def extract_datetime(text):
+    {email_context}  <-- EMAILS ARE HERE
+    
+    🗄️ NOTES:
+    {specific_knowledge}
+    
+    ❓ USER SAYS:
+    "{user_text}"
+    
+    INSTRUCTIONS:
+    1. Answer the user's question.
+    2. If 'RECENT EMAILS' are provided above, summarize them for the user.
+    3. Be concise and helpful.
     """
-    Attempts to extract a date/time from the text.
-    Defaults to 'Now' if nothing specific is found.
+
+    try:
+        response = requests.post(OLLAMA_URL, json={
+            "model": MODEL_NAME, "prompt": system_prompt, "stream": False
+        })
+        if response.status_code == 200:
+            return response.json().get("response", "I'm thinking...")
+        return "Error: Brain Offline"
+    except Exception as e:
+        return f"Connection Error: {e}"
+
+# --- 5. HELPERS ---
+def extract_metadata(text: str):
+    # (Keep your existing extract_metadata code here - it is used for commands)
+    current_time = datetime.now().strftime("%Y-%m-%d %H:%M")
+    prompt = f"""
+    Current Date: {current_time}
+    Input: "{text}"
+    Extract JSON: {{ "event": {{ "title": "...", "start_time": "YYYY-MM-DD HH:MM:SS", "category": "work/personal" }}, "location": "...", "reminder": {{ "is_reminder": true }} }}
+    Return ONLY JSON.
     """
     try:
-        # Quick heuristic for "tomorrow"
-        if "tomorrow" in text.lower():
-            dt = datetime.now() + timedelta(days=1)
-            # Try to find a specific time like "at 5 pm"
-            time_match = re.search(r'at (\d{1,2})(:(\d{2}))?\s*(am|pm)?', text.lower())
-            if time_match:
-                # Let dateutil handle the specific parsing of the time string
-                # We combine the tomorrow date with the time string found
-                return parser.parse(time_match.group(0), default=dt).isoformat()
-            
-            # Default to 9 AM tomorrow if no time specified
-            return dt.replace(hour=9, minute=0, second=0).isoformat()
-        
-        # Heuristic for "today at..."
-        if "at " in text.lower():
-            return parser.parse(text, fuzzy=True).isoformat()
-            
-    except:
-        pass
-    
-    # Fallback: Return current time
-    return datetime.now().isoformat()
+        response = requests.post(OLLAMA_URL, json={
+            "model": MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"
+        })
+        if response.status_code == 200:
+            return json.loads(response.json().get("response", "{}"))
+    except: return {}
+    return {}
 
-def extract_metadata(text):
+def detect_retrieval_intent(text: str):
+    # (Keep your existing detect_retrieval_intent code here)
+    today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    prompt = f"""
+    Today: {today}, Tomorrow: {tomorrow}
+    User: "{text}"
+    Task: Is this asking about a specific date?
+    Return JSON: {{ "intent": "get_schedule", "date_str": "...", "display_date": "..." }} OR {{ "intent": "none" }}
     """
-    Parses text to determine if it is a Memory, Event, or Reminder.
-    """
-    if not text: return {}
-    text_lower = text.lower()
-    
-    response_data = {}
-    
-    # 1. Voice Meta (Emotion)
-    emotion, stress = analyze_sentiment(text)
-    response_data["voice_meta"] = {"emotion_label": emotion, "stress_level": stress}
-
-    # 2. KEYWORD LISTS
-    event_keywords = ["schedule", "meeting", "appointment", "go to", "plan", "remind me", "have a"]
-    
-    # CASE A: EVENT / REMINDER
-    if any(x in text_lower for x in event_keywords):
-        start_time = extract_datetime(text)
-        
-        # Clean title: Remove "Remind me to" or "I have a"
-        clean_title = text
-        for phrase in ["remind me to", "i have a", "schedule a", "plan a"]:
-            if phrase in text_lower:
-                clean_title = text_lower.split(phrase, 1)[1].strip()
-        
-        # Construct Event
-        response_data["event"] = {
-            "title": clean_title.capitalize(),
-            "category": "Work" if "meeting" in text_lower else "Personal",
-            "start_time": start_time,
-            "location_name": "Office" if "meeting" in text_lower else "Home"
-        }
-        
-        # Construct Reminder
-        response_data["reminder"] = {
-            "recurrence": None,
-            "priority": "High" if "urgent" in text_lower else "Medium"
-        }
-        
-    # CASE B: MEMORY (Fallback)
-    else:
-        response_data["memory"] = {
-            "type": "diary",
-            "content": text,
-            "confidence": 0.5
-        }
-
-    return response_data
-
-def detect_retrieval_intent(text):
-    text = text.lower()
-    # Check keywords
-    if any(x in text for x in ["schedule", "plan", "events", "calendar"]):
-        target_date = datetime.now()
-        display = "today"
-        
-        if "tomorrow" in text:
-            target_date = target_date + timedelta(days=1)
-            display = "tomorrow"
-        elif "yesterday" in text:
-            target_date = target_date - timedelta(days=1)
-            display = "yesterday"
-            
-        return {
-            "intent": "get_schedule",
-            "date_str": target_date.strftime("%Y-%m-%d"),
-            "display_date": display
-        }
-    return None
+    try:
+        response = requests.post(OLLAMA_URL, json={
+            "model": MODEL_NAME, "prompt": prompt, "stream": False, "format": "json"
+        })
+        return json.loads(response.json().get("response", "{}"))
+    except: return {"intent": "none"}

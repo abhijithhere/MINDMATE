@@ -1,39 +1,39 @@
-from app.advanced_nlp import IntentAnalyzer
+import requests
+import json
 
-analyzer = IntentAnalyzer()
+BASE_URL = "http://localhost:8000"
 
-print(f"{'INPUT STRING':<50} | {'EXPECTED':<15} | {'RESULT':<15} | {'STATUS'}")
-print("-" * 95)
-
-test_cases = [
-    # --- LEVEL 1: HYPOTHETICALS (Should Ignore) ---
-    ("Suppose I fly to New York tomorrow", "assumption"),
-    ("Imagine if I had a meeting", "assumption"),
-    ("Let's say I finish strictly by Friday", "assumption"),
-
-    # --- LEVEL 2: RETRIEVAL (Should Search) ---
-    ("When did I say the meeting was?", "retrieval"),
-    ("Check if I have any plans", "retrieval"),
-    ("Do I have a reminder to call Mom?", "retrieval"),
+def test_persona(user_id, question, persona_name):
+    print(f"\n--- TESTING: {persona_name} ({user_id}) ---")
+    print(f"❓ Q: {question}")
     
-    # --- THE TRICKY CASE (Must be Retrieval) ---
-    # "Suppose" is present, but "What to do" makes it a question.
-    ("Suppose I have a meeting, what to do?", "retrieval"), 
+    payload = {"user_id": user_id, "text": question, "sender": "user"}
+    try:
+        response = requests.post(f"{BASE_URL}/chat/send", json=payload)
+        ai_reply = response.json().get('ai_response')
+        print(f"🤖 AI: {ai_reply}")
+    except Exception as e:
+        print(f"❌ Error: {e}")
 
-    # --- LEVEL 3: COMMANDS (Should Execute) ---
-    ("Remind me to wake up at 7 AM", "command"),
-    ("Schedule a flight to California", "command"),
-    ("Note that I need milk", "command"),
-    ("I have a meeting at 6 PM", "command"), # Matches "have a"
+def run_tests():
+    # 1. Test Doctor
+    # Expecting: Medical terminology, reference to "Atrial Fibrillation"
+    test_persona("dr_sarah", "What did I note about the patient in bed 4?", "Dr. Sarah")
+    
+    # 2. Test Chef
+    # Expecting: Culinary terms, reference to "Risotto" and "Lemon Zest"
+    test_persona("chef_mario", "What was wrong with the Risotto?", "Chef Mario")
+    
+    # 3. Test Lawyer
+    # Expecting: Legal jargon, reference to "Miranda vs Arizona" or "NDA"
+    test_persona("lawyer_alan", "What is the strategy for the Smith case?", "Lawyer Alan")
 
-    # --- LEVEL 4: NOISE (Should Log) ---
-    ("He told me that he was going to the gym", "conversation_or_noise"),
-    ("The weather looks nice today", "conversation_or_noise"),
-    ("Hello Jarvis", "conversation_or_noise"),
-]
+    # 4. Test Adaptive Explanations (Same question, different users)
+    # The AI should explain "Pressure" differently to a Doctor (Blood Pressure) vs a Chef (Pressure Cooker)
+    # (Note: This depends on how smart your Llama 3.2 model is with the profile prompt)
+    print("\n--- ADAPTIVITY TEST ---")
+    test_persona("dr_sarah", "Do I have any important meetings today?", "Dr. Sarah (Schedule)")
+    test_persona("chef_mario", "Do I have any important meetings today?", "Chef Mario (Schedule)")
 
-for text, expected in test_cases:
-    result = analyzer.analyze(text)
-    actual = result['type']
-    status = "✅ PASS" if actual == expected else "❌ FAIL"
-    print(f"{text:<50} | {expected:<15} | {actual:<15} | {status}")
+if __name__ == "__main__":
+    run_tests()

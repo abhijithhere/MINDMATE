@@ -1,74 +1,65 @@
 import sqlite3
 import os
-import random
 from datetime import datetime, timedelta
+import random
 
-# Database Path
+# Fix path to point to your actual database location
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, "db", "mindmate.db")
-USER_ID = "test_user"
+# Navigate to services/mindmate.db or db/mindmate.db depending on your folder
+DB_PATH = os.path.join(BASE_DIR, "db", "mindmate.db") 
 
-def get_db():
-    return sqlite3.connect(DB_PATH)
+# If your DB is in services/mindmate.db, change the line above to:
+# DB_PATH = os.path.join(BASE_DIR, "services", "mindmate.db")
 
-def generate_history():
-    print(f"🕰️ Generating 30 days of history for '{USER_ID}'...")
-    conn = get_db()
-    cur = conn.cursor()
+def seed_history(user_id="admin"):
+    if not os.path.exists(DB_PATH):
+        print(f"❌ Error: DB not found at {DB_PATH}")
+        return
 
-    # 1. Clear existing events to avoid duplicates
-    cur.execute("DELETE FROM events WHERE user_id = ?", (USER_ID,))
-    
-    # 2. Define Routines
-    weekday_routine = [
-        ("Morning Jog", "Health", 6, 7, "Park"),
-        ("Work", "Work", 9, 17, "Office"),
-        ("Read Book", "Personal", 20, 21, "Home"),
-        ("Sleep", "Health", 23, 7, "Home"), # Ends next day (handled simply here)
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    print(f"🌱 Planting 30 days of fake history for '{user_id}'...")
+
+    activities = [
+        ("08:00", "Gym"),
+        ("09:00", "Breakfast"),
+        ("10:00", "Work"),
+        ("13:00", "Lunch"),
+        ("14:00", "Work"),
+        ("18:00", "Study"),
+        ("20:00", "Dinner"),
+        ("23:00", "Sleep")
     ]
-    
-    weekend_routine = [
-        ("Sleep In", "Health", 0, 9, "Home"),
-        ("Gaming", "Leisure", 14, 16, "Home"),
-        ("Movie Night", "Social", 19, 22, "Cinema"),
-    ]
 
-    events_to_add = []
-    
-    # 3. Loop back 30 days
-    start_date = datetime.now().date() - timedelta(days=30)
-    
-    for day_offset in range(31): # 0 to 30
-        current_day = start_date + timedelta(days=day_offset)
-        is_weekend = current_day.weekday() >= 5 # 5=Sat, 6=Sun
+    # Generate data for the PAST 30 days
+    base_date = datetime.now() - timedelta(days=30)
+
+    count = 0
+    for day in range(30):
+        current_date = base_date + timedelta(days=day)
+        date_str = current_date.strftime("%Y-%m-%d")
         
-        routine = weekend_routine if is_weekend else weekday_routine
-        
-        for title, cat, start_hour, end_hour, loc in routine:
-            # Add randomness (e.g., +/- 15 mins)
-            minute_offset = random.randint(-15, 15)
-            
-            # Construct ISO timestamps
-            s_time = datetime(current_day.year, current_day.month, current_day.day, start_hour, 0) + timedelta(minutes=minute_offset)
-            e_time = datetime(current_day.year, current_day.month, current_day.day, end_hour, 0) + timedelta(minutes=minute_offset)
-            
-            # Handle overnight sleep (end time is next day)
-            if end_hour < start_hour:
-                e_time += timedelta(days=1)
+        for time_str, title in activities:
+            # 20% chance to skip an activity (adds realism)
+            if random.random() < 0.2:
+                continue
 
-            events_to_add.append((
-                USER_ID, title, cat, s_time.isoformat(), e_time.isoformat(), loc
-            ))
-
-    # 4. Batch Insert
-    cur.executemany("""
-        INSERT INTO events (user_id, title, category, start_time, end_time)
-        VALUES (?, ?, ?, ?, ?)
-    """, [e[:5] for e in events_to_add]) # We ignore location for now as schema might vary
+            start_dt = f"{date_str} {time_str}:00"
+            
+            # Simple Insert
+            try:
+                cursor.execute("""
+                    INSERT INTO events (user_id, title, start_time, location_id, category)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (user_id, title, start_dt, "Home", "Routine"))
+                count += 1
+            except Exception as e:
+                print(f"Error inserting: {e}")
 
     conn.commit()
     conn.close()
-    print(f"✅ Successfully added {len(events_to_add)} events.")
+    print(f"✅ Successfully added {count} event logs for '{user_id}'!")
 
 if __name__ == "__main__":
-    generate_history()
+    seed_history()

@@ -13,14 +13,23 @@ def init_db():
     conn = get_db_connection()
     cur = conn.cursor()
     
-    # 1. USERS TABLE (New!)
+    # 1. USERS TABLE
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY,
             password_hash TEXT NOT NULL,
+            wake_word TEXT DEFAULT 'mindmate',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # --- 🟢 AUTO-CREATE DEFAULT USER (PLAIN TEXT) ---
+    cur.execute("SELECT user_id FROM users WHERE user_id = 'admin'")
+    if not cur.fetchone():
+        # DIRECTLY INSERTING 'admin' AS PASSWORD (NO HASHING)
+        cur.execute("INSERT INTO users (user_id, password_hash) VALUES (?, ?)", ('admin', 'admin'))
+        print("👤 Default user 'admin' created (Password: admin)")
+    # -----------------------------------------------
 
     # 2. EVENTS TABLE
     cur.execute("""
@@ -50,12 +59,12 @@ def init_db():
         )
     """)
 
-    # 4. CHAT MESSAGES TABLE (New!)
+    # 4. CHAT MESSAGES TABLE
     cur.execute("""
         CREATE TABLE IF NOT EXISTS chat_messages (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id TEXT,
-            sender TEXT,  -- 'user' or 'ai'
+            sender TEXT,
             text TEXT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(user_id)
@@ -75,9 +84,11 @@ def init_db():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS reminders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            event_id INTEGER,
             user_id TEXT,
+            event_id INTEGER,
+            message TEXT,
             trigger_time TEXT,
+            status TEXT DEFAULT 'pending',
             recurrence_rule TEXT,
             priority_level TEXT,
             FOREIGN KEY(event_id) REFERENCES events(id)
@@ -99,7 +110,7 @@ def init_db():
 
     conn.commit()
     conn.close()
-    print("✅ Database tables initialized successfully.")
+    print("✅ Database tables checked/initialized (Plain Text Mode).")
 
 if __name__ == "__main__":
     init_db()
