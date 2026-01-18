@@ -1,0 +1,44 @@
+
+A new Flutter project.
+
+## Getting Started
+
+This project is a starting point for a Flutter application.
+
+A few resources to get you started if this is your first Flutter project:
+
+- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.
+
+## to run flutter
+
+cd frontend
+flutter emulator
+
+## find the emulator
+
+flutter emulators --launch Pixel_6    
+
+## to run backend
+
+ uvicorn app.main:app --reload           
+
+  uvicorn main:app --reload --host 0.0.0.0 --port 8000   
+
+  The Whisper model is hidden here:
+C:\Users\abhij\.cache\huggingface\hub\models--Systran--faster-whisper-tiny\snapshots\d90ca5fe260221311c53c58e660288d3deb8d356   
+
+
+
+
+
+to do
+
+1. coversational bot
+2. tts
+3. knowledge guidence
+4. voice authentication.

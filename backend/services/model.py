@@ -50,7 +50,7 @@ class MindMateModel:
 
     def suggest_daily_schedule(self, target_date_str):
         # ... (Keep existing simulation logic) ...
-        # (This part doesn't need path changes)
+        # (This part doesn't need path changes)AC
         try:
             target_date = datetime.strptime(target_date_str, "%Y-%m-%d")
         except ValueError:

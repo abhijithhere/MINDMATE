@@ -4,7 +4,7 @@ import os
 # CONFIG
 BASE_URL = "http://localhost:8000"
 # ✅ UPDATED: Matching your actual file name
-AUDIO_FILE = "my_voice_recording.wav"  
+AUDIO_FILE = "voice.wav"  
 USER_ID = "test_user_123"
 
 def run_test():

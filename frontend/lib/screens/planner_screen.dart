@@ -2,7 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:intl/intl.dart';
-import '../main.dart';
+import '../core/theme/app_theme.dart'; // 👈 IMPORTED THEME
+import '../core/constants/api_constants.dart'; // 👈 IMPORTED CONSTANTS
 
 class PlannerScreen extends StatefulWidget {
   const PlannerScreen({super.key});
@@ -28,21 +29,21 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    _fetchAISchedule(); // Load tomorrow's plan by default
+    _fetchAISchedule(); 
   }
 
   // --- 1. AI PREDICTION LOGIC ---
   Future<void> _fetchAISchedule() async {
     setState(() => isPredicting = true);
     String dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
-    final url = Uri.parse('http://10.0.2.2:8000/predict/schedule?date=$dateStr');
+    final url = Uri.parse('${ApiConstants.baseUrl}/predict/schedule?date=$dateStr');
     
     try {
       final response = await http.get(url);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          aiSchedule = data['suggested_schedule'];
+          aiSchedule = data['suggested_schedule'] ?? [];
         });
       }
     } catch (e) {
@@ -60,7 +61,7 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
     String start = DateFormat('yyyy-MM-dd').format(selectedRange!.start);
     String end = DateFormat('yyyy-MM-dd').format(selectedRange!.end);
     
-    final url = Uri.parse('http://10.0.2.2:8000/analytics/period?user_id=test_user&start_date=$start&end_date=$end');
+    final url = Uri.parse('${ApiConstants.baseUrl}/analytics/period?user_id=test_user&start_date=$start&end_date=$end');
 
     try {
       final response = await http.get(url);
@@ -80,13 +81,15 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.kBackgroundDark, // Updated
       appBar: AppBar(
         title: const Text("Planner & Review"),
+        backgroundColor: AppTheme.kBackgroundDark,
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: kPrimaryTeal,
-          labelColor: kPrimaryTeal,
-          unselectedLabelColor: kTextGrey,
+          indicatorColor: AppTheme.kPrimaryTeal, // Updated
+          labelColor: AppTheme.kPrimaryTeal, // Updated
+          unselectedLabelColor: AppTheme.kTextGrey, // Updated
           tabs: const [
             Tab(text: "AI Suggestion"),
             Tab(text: "Period Review"),
@@ -115,10 +118,10 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
             children: [
               Text(
                 "Plan for: ${DateFormat('MMM d').format(selectedDate)}",
-                style: const TextStyle(color: kTextWhite, fontSize: 18),
+                style: const TextStyle(color: AppTheme.kTextWhite, fontSize: 18), // Updated
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: kCardDark),
+                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.kCardDark), // Updated
                 onPressed: () async {
                   final picked = await showDatePicker(
                     context: context,
@@ -131,14 +134,14 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
                     _fetchAISchedule();
                   }
                 },
-                child: const Text("Change Date", style: TextStyle(color: kPrimaryTeal)),
+                child: const Text("Change Date", style: TextStyle(color: AppTheme.kPrimaryTeal)), // Updated
               )
             ],
           ),
           const SizedBox(height: 20),
           
           isPredicting 
-          ? const CircularProgressIndicator(color: kPrimaryTeal)
+          ? const CircularProgressIndicator(color: AppTheme.kPrimaryTeal) // Updated
           : Expanded(
               child: ListView.builder(
                 itemCount: aiSchedule.length,
@@ -148,16 +151,16 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
                     margin: const EdgeInsets.only(bottom: 12),
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: kCardDark,
+                      color: AppTheme.kCardDark, // Updated
                       borderRadius: BorderRadius.circular(12),
-                      border: Border(left: BorderSide(color: kPrimaryTeal.withOpacity(0.5), width: 4)),
+                      border: Border(left: BorderSide(color: AppTheme.kPrimaryTeal.withOpacity(0.5), width: 4)), // Updated
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(item['time'], style: const TextStyle(color: kTextGrey, fontWeight: FontWeight.bold)),
-                        Text(item['activity'], style: const TextStyle(color: kTextWhite, fontSize: 16)),
-                        Icon(Icons.arrow_forward, color: kTextGrey.withOpacity(0.3), size: 16),
+                        Text(item['time'], style: const TextStyle(color: AppTheme.kTextGrey, fontWeight: FontWeight.bold)), // Updated
+                        Text(item['activity'], style: const TextStyle(color: AppTheme.kTextWhite, fontSize: 16)), // Updated
+                        Icon(Icons.arrow_forward, color: AppTheme.kTextGrey.withOpacity(0.3), size: 16), // Updated
                       ],
                     ),
                   );
@@ -176,10 +179,10 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
       child: Column(
         children: [
           ElevatedButton.icon(
-            icon: const Icon(Icons.calendar_month, color: kBackgroundDark),
+            icon: const Icon(Icons.calendar_month, color: AppTheme.kBackgroundDark), // Updated
             label: Text(selectedRange == null ? "Select Period" : "Change Period", 
-              style: const TextStyle(color: kBackgroundDark, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(backgroundColor: kPrimaryTeal),
+              style: const TextStyle(color: AppTheme.kBackgroundDark, fontWeight: FontWeight.bold)), // Updated
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.kPrimaryTeal), // Updated
             onPressed: () async {
               final picked = await showDateRangePicker(
                 context: context,
@@ -189,9 +192,9 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
                   return Theme(
                     data: ThemeData.dark().copyWith(
                       colorScheme: const ColorScheme.dark(
-                        primary: kPrimaryTeal,
+                        primary: AppTheme.kPrimaryTeal, // Updated
                         onPrimary: Colors.black,
-                        surface: kCardDark,
+                        surface: AppTheme.kCardDark, // Updated
                       ),
                     ),
                     child: child!,
@@ -208,22 +211,22 @@ class _PlannerScreenState extends State<PlannerScreen> with SingleTickerProvider
           if (selectedRange != null)
             Text(
               "${DateFormat('MM/dd').format(selectedRange!.start)} - ${DateFormat('MM/dd').format(selectedRange!.end)}",
-              style: const TextStyle(color: kTextGrey),
+              style: const TextStyle(color: AppTheme.kTextGrey), // Updated
             ),
           const SizedBox(height: 30),
           
           isLoadingStats
-          ? const CircularProgressIndicator(color: kPrimaryTeal)
+          ? const CircularProgressIndicator(color: AppTheme.kPrimaryTeal) // Updated
           : stats.isEmpty 
-              ? const Text("Select a range to see analytics", style: TextStyle(color: kTextGrey))
+              ? const Text("Select a range to see analytics", style: TextStyle(color: AppTheme.kTextGrey)) // Updated
               : Expanded(
                   child: ListView(
                     children: stats.entries.map((entry) {
                       return ListTile(
-                        leading: const Icon(Icons.pie_chart, color: kAccentGreen),
-                        title: Text(entry.key, style: const TextStyle(color: kTextWhite)),
+                        leading: const Icon(Icons.pie_chart, color: AppTheme.kAccentGreen), // Updated
+                        title: Text(entry.key, style: const TextStyle(color: AppTheme.kTextWhite)), // Updated
                         trailing: Text("${entry.value.toStringAsFixed(1)} hours", 
-                          style: const TextStyle(color: kPrimaryTeal, fontWeight: FontWeight.bold, fontSize: 16)),
+                          style: const TextStyle(color: AppTheme.kPrimaryTeal, fontWeight: FontWeight.bold, fontSize: 16)), // Updated
                       );
                     }).toList(),
                   ),

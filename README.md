@@ -29,3 +29,15 @@ flutter emulators --launch Pixel_6
  uvicorn app.main:app --reload           
 
   uvicorn main:app --reload --host 0.0.0.0 --port 8000      
+
+
+
+  Core Features:
+
+Cognitive Brain: Integration with Ollama (Phi-3) for context-aware assistant responses.
+
+Lifestyle Prediction: Random Forest Classifier (habit_model.pkl) trained on daily routines to predict user activities.
+
+RAG System: Real-time retrieval of notes and schedules from SQLite to provide factual answers.
+
+Voice Intelligence: Whisper-based STT for hands-free interaction.

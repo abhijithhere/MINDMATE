@@ -42,6 +42,7 @@ class AI_Assistant:
             return 4 # Default to 'Rest' on error
 
     def generate_day_schedule(self, date_str):
+        current_activity_id = 0
         """
         Predicts the TIMETABLE for a specific future date.
         """
@@ -57,18 +58,20 @@ class AI_Assistant:
         current_activity_id = 0 
         
         # Loop through 24 hours
+        # Loop through 24 hours
         for hour in range(24):
-            # Predict next activity based on time AND what you just did
-            next_activity_id = self.predict_activity(hour, day_of_week, month, current_activity_id)
+            # Call the model ONCE and store it in next_id
+            next_id = self.predict_activity(hour, day_of_week, month, current_activity_id)
             
-            activity_name = self.inv_activity_map.get(next_activity_id, "Unknown")
+            # Use next_id to get the name
+            activity_name = self.inv_activity_map.get(next_id, "Unknown")
             
-            # Format time (e.g., 09:00)
+            # Format and save to schedule
             time_str = f"{hour:02d}:00"
             schedule.append((time_str, activity_name))
             
-            # Update 'previous' for the next loop iteration (Chain of thought)
-            current_activity_id = next_activity_id
+            # VERY IMPORTANT: Move next_id into current_activity_id for the next hour
+            current_activity_id = next_id
             
         return schedule
 

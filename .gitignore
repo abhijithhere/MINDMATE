@@ -12,7 +12,11 @@ backend/models/*.pkl
 *.db
 *.sqlite3
 backend/mindmate.db
-
+credentials.json
+token.pickle
+# Python Environment
+__pycache__/
+*.pyc
 # Flutter / Frontend
 frontend/build/
 frontend/.dart_tool/

@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import '../main.dart'; // Imports your global theme colors
 import 'package:shared_preferences/shared_preferences.dart';
+import '../core/theme/app_theme.dart'; // 👈 Needed for colors
+import '../core/constants/api_constants.dart';
 
 class TimelineScreen extends StatefulWidget {
   const TimelineScreen({super.key});
@@ -23,26 +24,23 @@ class _TimelineScreenState extends State<TimelineScreen> {
 
 
   Future<void> fetchMemories() async {
-  // 1. Get the real User ID
-  final prefs = await SharedPreferences.getInstance();
-  final userId = prefs.getString('user_id');
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('user_id');
 
-  if (userId == null) return; // Should not happen if logged in
+    if (userId == null) return; 
 
-  // 2. Use it in the URL
-  final url = Uri.parse('http://10.0.2.2:8000/memories?user_id=$userId');
-  
-  try {
-    final response = await http.get(url);
-      
+    final url = Uri.parse('${ApiConstants.baseUrl}/memories?user_id=$userId');
+    
+    try {
+      final response = await http.get(url);
+        
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          timelineItems = data['timeline'];
+          timelineItems = data['timeline'] ?? [];
           isLoading = false;
         });
       } else {
-        print("Error: ${response.statusCode}");
         setState(() => isLoading = false);
       }
     } catch (e) {
@@ -51,17 +49,17 @@ class _TimelineScreenState extends State<TimelineScreen> {
     }
   }
 
-
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.kBackgroundDark, // 👈 Fixed
       appBar: AppBar(
         title: const Text("Your Timeline"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_ios_new_rounded),
           onPressed: () {
-            // ✅ FIX: This line makes the back button work
             Navigator.pop(context);
           },
         ),
@@ -75,11 +73,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       body: isLoading
           ? const Center(
               child: CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(kPrimaryTeal),
+                valueColor: AlwaysStoppedAnimation<Color>(AppTheme.kPrimaryTeal), // 👈 Fixed
               ),
             )
           : timelineItems.isEmpty 
-              ? _buildEmptyState() // Show this if list is truly empty
+              ? _buildEmptyState() 
               : ListView.builder(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   itemCount: timelineItems.length,
@@ -96,9 +94,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.history_toggle_off, size: 80, color: kTextGrey.withOpacity(0.5)),
+          Icon(Icons.history_toggle_off, size: 80, color: AppTheme.kTextGrey.withOpacity(0.5)),
           const SizedBox(height: 16),
-          const Text("No memories yet", style: TextStyle(color: kTextGrey, fontSize: 18)),
+          const Text("No memories yet", style: TextStyle(color: AppTheme.kTextGrey, fontSize: 18)),
         ],
       ),
     );
@@ -107,10 +105,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
   Widget _buildGlowingCard(Map<String, dynamic> item) {
     bool isEvent = item['type'] == 'event';
     
-    // Define gradient colors based on type
     final List<Color> gradientColors = isEvent
-        ? [kPrimaryTeal, kAccentGreen] // Teal-to-Green for Events
-        : [const Color(0xFFAB47BC), const Color(0xFF7E57C2)]; // Purple-to-Blue for Memories
+        ? [AppTheme.kPrimaryTeal, AppTheme.kAccentGreen]
+        : [const Color(0xFFAB47BC), const Color(0xFF7E57C2)]; 
 
     IconData icon = isEvent ? Icons.event_available_rounded : Icons.lightbulb_outline_rounded;
 
@@ -129,12 +126,11 @@ class _TimelineScreenState extends State<TimelineScreen> {
       child: ClipRRect(
         borderRadius: BorderRadius.circular(20),
         child: Container(
-          color: kCardDark,
+          color: AppTheme.kCardDark,
           child: IntrinsicHeight(
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // --- GLOWING INDICATOR BAR ---
                 Container(
                   width: 6,
                   decoration: BoxDecoration(
@@ -145,15 +141,12 @@ class _TimelineScreenState extends State<TimelineScreen> {
                     ),
                   ),
                 ),
-                
-                // --- CARD CONTENT ---
                 Expanded(
                   child: Padding(
                     padding: const EdgeInsets.all(16),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // --- ICON ---
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
@@ -167,8 +160,6 @@ class _TimelineScreenState extends State<TimelineScreen> {
                           child: Icon(icon, color: gradientColors[0]),
                         ),
                         const SizedBox(width: 16),
-                        
-                        // --- TEXT ---
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -177,6 +168,7 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                 isEvent ? item['title'] : item['content'],
                                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                   fontSize: 16,
+                                  color: Colors.white,
                                   height: 1.2,
                                 ),
                                 maxLines: 2,
@@ -185,11 +177,10 @@ class _TimelineScreenState extends State<TimelineScreen> {
                               const SizedBox(height: 8),
                               Row(
                                 children: [
-                                  // Category Chip
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: kBackgroundDark,
+                                      color: AppTheme.kBackgroundDark,
                                       borderRadius: BorderRadius.circular(10),
                                     ),
                                     child: Text(
@@ -202,10 +193,9 @@ class _TimelineScreenState extends State<TimelineScreen> {
                                     ),
                                   ),
                                   const Spacer(),
-                                  // Time
                                   Text(
                                     _formatTime(item['start_time']),
-                                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontSize: 12),
+                                    style: const TextStyle(color: AppTheme.kTextGrey, fontSize: 12),
                                   ),
                                 ],
                               ),

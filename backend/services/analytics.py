@@ -7,13 +7,12 @@ def get_daily_summary(user_id: str):
     Returns a calculated summary of today's activities and stats.
     """
     conn = get_db()
-    conn.row_factory = None # Ensure we get tuples for this specific query if needed, or handle dicts
+    conn.row_factory = None 
     cur = conn.cursor()
     
     today_str = datetime.now().strftime("%Y-%m-%d")
     
     # 1. Fetch today's completed events
-    # We use LIKE 'YYYY-MM-DD%' to match the ISO format string in DB
     cur.execute("""
         SELECT title, category, start_time 
         FROM events 
@@ -39,10 +38,6 @@ def get_daily_summary(user_id: str):
     timeline = []
     
     for row in events:
-        # If using row_factory, access by index or key depending on setup.
-        # Assuming standard tuple here based on previous code style, 
-        # but if row_factory is sqlite3.Row, we use keys.
-        # Let's handle both safely:
         try:
             title = row['title']
             category = row['category']
@@ -52,7 +47,7 @@ def get_daily_summary(user_id: str):
             category = row[1]
             start_time = row[2]
 
-        # Build Timeline (extract HH:MM from YYYY-MM-DD HH:MM:SS)
+        # Build Timeline
         time_str = start_time.split(' ')[1][:5] if ' ' in start_time else start_time
         timeline.append(f"{time_str} - {title}")
         
