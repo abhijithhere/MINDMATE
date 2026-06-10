@@ -7,6 +7,10 @@ from services.db import get_db
 from psycopg2.extras import RealDictCursor
 from models.predictor import HabitEngine # 🟢 Uses the updated Engine with LabelEncoder
 
+from fastapi import APIRouter, Query
+
+router = APIRouter(tags=["Memories & Planner"])
+
 # Single router definition
 router = APIRouter(tags=["Memories & Planner"])
 
@@ -58,37 +62,33 @@ def add_memory(memory: MemoryRequest):
         cursor.close()
         conn.close()
 
-# --- 2. AI FUTURE PLANNER (Predictive Logic) ---
+
 
 @router.get("/predict-timetable")
-async def predict_timetable(user_id: str, target_date: str):
-    """
-    Core AI logic. Uses the trained Random Forest model to 
-    generate a 24-hour forecast based on user habits.
-    """
+async def predict_timetable(user_id: str, target_date: str = Query(...)):
     try:
-        # 1. Parse date to extract DayOfWeek and Month
-        date_obj = datetime.strptime(target_date, "%Y-%m-%d")
+        # 1. Parse the date (e.g., "2026-04-22")
+        dt_obj = datetime.strptime(target_date, "%Y-%m-%d")
         
-        # 2. Initialize Engine (which loads the .pkl + LabelEncoder)
+        # 2. Initialize Engine with the current user
+        # This will load: models/users/meanonymus87@gmail.com.pkl
         engine = HabitEngine(user_id)
         
         timetable = []
-        for h in range(24):
-            # 🤖 AI Prediction
-            # Predict uses: Hour (h), DayOfWeek (0-6), Month (1-12)
-            activity = engine.predict(h, date_obj.weekday(), date_obj.month)
+        for hour in range(24):
+            # 🟢 THE FIX: Pass DayOfWeek and Month to the model
+            # weekday() returns 0 for Monday, 6 for Sunday
+            activity = engine.predict(hour, dt_obj.weekday(), dt_obj.month)
             
             timetable.append({
-                "time": f"{h:02d}:00",
-                "activity": activity
+                "time": f"{str(hour).zfill(2)}:00",
+                "activity": activity.replace("acctivity", "activity")
             })
             
-        # Matches Flutter: aiSchedule = data['timetable']
         return {"timetable": timetable}
     except Exception as e:
-        print(f"❌ Planner Error: {e}")
-        return {"error": str(e), "timetable": []}
+        print(f"❌ Timetable Error: {e}")
+        return {"timetable": [], "error": str(e)}
 
 # --- 3. OLLAMA FALLBACK ---
 

@@ -1,22 +1,24 @@
-def build_prompt(user_text: str, context: str) -> str:
-    return f"""
-You are MindMate, a personal AI assistant. 
-Your goal is to help the user manage their life based on their PAST MEMORIES and CURRENT REQUESTS.
+# rag/prompt_builder.py
 
----
-PAST CONTEXT (Use this for background info):
-{context if context else "No previous records found."}
+def build_prompt(user_text: str, context: str = "") -> str:
+    """
+    Builds Ollama prompt for MindMate.
+    Context is semantic search results ONLY — not chat history (avoids repetition).
+    """
+    ctx = context.strip() if context.strip() else "No previous records found."
+    return f"""You are MindMate, a concise personal AI voice assistant.
+Wake words: "mate", "mindmate", "buddy".
 
-CURRENT USER INPUT (Priority):
-"{user_text}"
----
+RELEVANT USER DATA:
+{ctx}
 
-STRICT RULES:
-1. If the user provides a NEW fact (like a meeting time), acknowledge that NEW fact.
-2. Use PAST CONTEXT only to add detail or remind the user of related info.
-3. If the user's new input conflicts with old memory, prioritize the NEW input.
-4. Keep the response concise and helpful.
+USER JUST SAID: "{user_text}"
 
+RULES (read before replying):
+1. Reply in 1-2 SHORT sentences, max 25 words. You will be spoken aloud via TTS.
+3. If storing data: "Got it, I've saved that to your [reminders/notes/events]."
+4. If answering a question: give a direct answer using the context above.
+5. If casual chat or wake word only: greet briefly and ask what they need.
+6. Do NOT start with "I", "Sure", "Of course", "Certainly", or "As an AI".
 
-RESPONSE:
-"""
+RESPONSE:"""

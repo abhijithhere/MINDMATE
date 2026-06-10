@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../core/constants/api_constants.dart';
 import '../../../main_layout.dart';
+import 'voice_enrollment_screen.dart';
 
 class VoiceLoginScreen extends StatefulWidget {
   const VoiceLoginScreen({super.key});

@@ -1,38 +1,97 @@
-# --- Python & Environment ---
+#  SECURITY & CREDENTIALS (CRITICAL)
+
 .env
+backend/.env
+backend/credentials.json
+backend/token.pickle
+backend/tokens/
+backend/db.txt
+
+# VSCode & IDEs
+
+.vscode/
+.idea/
+*.code-workspace
+
+# Python & Cache
+
 __pycache__/
+backend/app/__pycache__/
+backend/app/routers/__pycache__/
+backend/rag/__pycache__/
+backend/services/__pycache__/
+backend/models/__pycache__/
 *.py[cod]
+*$py.class
+*.pyd
+*.so
+*.egg-info/
+.eggs/
+*.egg
+build/
+dist/
+*.log
+
+# Virtual Environments
+
 .venv/
 venv/
 ENV/
-.DS_Store
+env/
 
-# --- Google Auth (CRITICAL PRIVACY) ---
-# Ignore the main credentials and ALL user-specific tokens
-credentials.json
-token.pickle
-tokens/
-*.pickle
+# Database
 
-# --- Databases & Large Files ---
-*.db
+instance/
 *.sqlite3
-*.wav
 backend/db/*.db
-backend/mindmate.db
-# Ignore pgvector/pytorch model files if stored locally
-backend/models/*.pkl
-*.onnx
-*.pt
-*.bin
 
-# --- Flutter / Frontend ---
+# Backend Audio & Artifacts
+
+backend/temp_audio/
+backend/uploads/
+backend/app/routers/uploads/
+backend/my_voice_*.wav
+backend/voice.wav
+backend/*.wav
+
+# ML Models & Checkpoints
+
+backend/models/*.ckpt
+backend/models/*.pkl
+backend/models/*.pickle
+backend/models/*.pt
+backend/models/**/*.ckpt
+backend/models/**/*.pkl
+backend/models/**/*.pickle
+backend/models/**/*.pt
+backend/voice_auth_model/
+backend/voice_signatures/
+backend/models/global_training_data.csv
+backend/models/test_mindmate.json
+*.jsonl
+
+
+# Flutter / Dart / Frontend
+
+*.iml
+.dart_tool/
+.packages
+.pub-cache/
+/build/
+/coverage/
 frontend/build/
 frontend/.dart_tool/
 frontend/.flutter-plugins
 frontend/.flutter-plugins-dependencies
-frontend/.pub-cache/
-frontend/.idea/
-frontend/android/.gradle
-frontend/ios/Flutter/Generated.xcconfig
-frontend/ios/Flutter/flutter_export_environment.sh
+frontend/build_log.txt
+frontend/ios/Pods/
+frontend/android/.gradle/
+
+# OS & Temp Logs
+
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*.tmp
+temp_file

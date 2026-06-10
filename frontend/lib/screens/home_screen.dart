@@ -1,15 +1,16 @@
+//frontend\lib\screens\home_screen.dart
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/theme/app_theme.dart';
 import '../core/constants/api_constants.dart';
-import 'login_screen.dart';
-
-// 🟢 CORRECT IMPORTS (Pointing to features folder)
+import '../features/auth/screens/login_screen.dart';
 import '../features/chat/screens/chat_screen.dart';
+import 'reminders_screen.dart'; 
 import '../features/voice_mode_screen.dart'; 
+import '../features/chat/screens/todo_screen.dart'; // 🟢 Added for the new To-Do feature
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,8 +21,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String userName = "Guest"; 
-  List<dynamic> todayEvents = [];
-  Map<String, dynamic>? aiPrediction;
+  String? userId; 
+  List<dynamic> upcomingReminders = []; 
   bool isLoading = true;
 
   @override
@@ -32,27 +33,28 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _loadUserAndData() async {
     final prefs = await SharedPreferences.getInstance();
-    final String? userId = prefs.getString('user_id');
+    userId = prefs.getString('user_id');
 
     if (userId == null) {
       _logout();
       return;
     }
 
-    setState(() => userName = userId!);
+    setState(() => userName = userId!.split('@')[0]); 
 
-    final timelineUrl = Uri.parse('${ApiConstants.baseUrl}/memories?user_id=$userId');
+    // 🟢 Fetching HIGH PRIORITY Reminders for the dashboard
+    final reminderUrl = Uri.parse('${ApiConstants.baseUrl}/reminders/filter?user_id=$userId&priorities=High');
     
     try {
-      final response = await http.get(timelineUrl);
+      final response = await http.get(reminderUrl);
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         setState(() {
-          todayEvents = (data['timeline'] as List).take(3).toList();
+          upcomingReminders = (data['reminders'] as List).take(2).toList();
         });
       }
     } catch (e) {
-      print("Error loading dashboard: $e");
+      debugPrint("Error loading reminders: $e");
     } finally {
       setState(() => isLoading = false);
     }
@@ -78,43 +80,94 @@ class _HomeScreenState extends State<HomeScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text("Welcome Back,\n$userName", style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
-                      IconButton(icon: const Icon(Icons.logout, color: Colors.white), onPressed: _logout)
-                    ],
-                  ),
+                  _buildHeader(),
                   const SizedBox(height: 30),
                   
-                  // Quick Actions
-                  Row(
-                    children: [
-                      Expanded(
-                        child: _buildActionCard("Voice Mode", Icons.mic, Colors.purple, 
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const VoiceModeScreen()))),
-                      ),
-                      const SizedBox(width: 15),
-                      Expanded(
-                        child: _buildActionCard("Chat", Icons.chat, Colors.blue, 
-                          () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChatScreen()))),
-                      ),
-                    ],
-                  ),
-                  
-                  const SizedBox(height: 30),
-                  const Text("Today's Schedule", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const Text("Quick Actions", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 15),
                   
-                  ...todayEvents.map((e) => Container(
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: const EdgeInsets.all(15),
-                    decoration: BoxDecoration(color: AppTheme.kCardDark, borderRadius: BorderRadius.circular(15)),
-                    child: Text(e['title'] ?? "Event", style: const TextStyle(color: Colors.white)),
-                  ))
+                  GridView.count(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisCount: 2, // Changed to 2 for better UI balance
+                    childAspectRatio: 1.5,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                    children: [
+                      _buildActionCard("Voice Mode", Icons.mic, Colors.purple, 
+                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => VoiceModeScreen(userId: userId)))),
+                      
+                      _buildActionCard("AI Chat", Icons.chat, Colors.blue, 
+                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(userId: userId!)))),
+                      
+                      _buildActionCard("High Alerts", Icons.notification_important, Colors.redAccent, 
+                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => RemindersScreen(userId: userId!)))),
+                      
+                      // 🟢 NEW: To-Do List (Low/Medium Priority)
+                      _buildActionCard("To-Do List", Icons.checklist, AppTheme.kPrimaryTeal, 
+                        () => Navigator.push(context, MaterialPageRoute(builder: (_) => TodoScreen(userId: userId!)))),
+                    ],
+                  ),
+                  
+                  const SizedBox(height: 35),
+                  const Text("Critical Alarms", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 15),
+                  
+                  if (upcomingReminders.isEmpty)
+                    const Text("No high-priority alerts today", style: TextStyle(color: Colors.grey))
+                  else
+                    ...upcomingReminders.map((r) => _buildMiniReminder(r)),
                 ],
               ),
             ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text("Welcome Back,", style: TextStyle(color: Colors.white54, fontSize: 14)),
+            Text(userName.toUpperCase(), style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold, letterSpacing: 1)),
+          ],
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout_rounded, color: Colors.white38), 
+          onPressed: _logout
+        )
+      ],
+    );
+  }
+
+  Widget _buildMiniReminder(Map<String, dynamic> r) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.kCardDark, 
+        borderRadius: BorderRadius.circular(20),
+        border: const Border(left: BorderSide(color: Colors.redAccent, width: 4))
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.access_alarm, color: Colors.redAccent, size: 20),
+          const SizedBox(width: 15),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(r['title'] ?? "Reminder", style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                const SizedBox(height: 4),
+                Text(r['trigger_time'] ?? "", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+              ],
+            ),
+          ),
+          const Icon(Icons.chevron_right, color: Colors.white10),
+        ],
       ),
     );
   }
@@ -123,18 +176,17 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        height: 100,
         decoration: BoxDecoration(
           color: AppTheme.kCardDark,
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withOpacity(0.3)),
+          borderRadius: BorderRadius.circular(22),
+          border: Border.all(color: color.withOpacity(0.15)),
         ),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Icon(icon, color: color, size: 30),
             const SizedBox(height: 10),
-            Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            Text(label, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
           ],
         ),
       ),

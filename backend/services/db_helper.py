@@ -1,222 +1,257 @@
-import psycopg2
-from psycopg2.extras import RealDictCursor
+# services/db_helper.py
+"""
+Central data router for MindMate.
+IMPORTANT: This file must NOT import from any other services/ file.
+           It only imports from rag/ and services/db.py.
+           This prevents circular imports (gmail → db_helper → gmail).
+"""
+
 from datetime import datetime, timedelta
 from dateutil.parser import parse as date_parse
-from sentence_transformers import SentenceTransformer
-from services.db import get_db, get_cursor
-from datetime import datetime
-from rag.embedder import embed_text
+from psycopg2.extras import RealDictCursor
 
-# Load the vector model (optimized for your Ryzen 7)
-model = SentenceTransformer('all-MiniLM-L6-v2')
-def save_to_appropriate_table(user_id, analysis, original_text=""):
+from services.db import get_db
+from rag.embedder import generate_embedding   # rag/ is safe — no back-reference
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. MAIN ROUTER
+# ─────────────────────────────────────────────────────────────────────────────
+def save_to_appropriate_table(
+    user_id:         str,
+    analysis:        dict,
+    text:            str  = "",
+    source:          str  = "Voice",
+    flag:            int  = 0,
+    origin_location: str  = None,
+) -> str:
+    """
+    Routes classified content to the correct DB table.
+
+    analysis keys used:
+      decision        : STORE | CRUD | IGNORE
+      category        : reminder | event | memory | lecture | note | task
+      type            : (Gmail) event | note | task  — overrides category
+      data            : (Gmail) nested dict {title, content, date, location}
+      summary         : short string
+      priority        : "High" | "Low"
+      is_long         : bool
+      trigger_time    : fuzzy or ISO timestamp string
+    """
+    src = origin_location or source
+
+    if not text or len(text.strip()) < 5:
+        return "Skipped: too short"
+    if analysis.get("decision") == "IGNORE":
+        return "Ignored"
+
+    # Gmail compat: analysis may have type + data instead of category
+    gmail_data = analysis.get("data") or {}
+    gmail_type = analysis.get("type", "")
+    category   = (gmail_type or analysis.get("category", "note")).lower()
+    summary    = analysis.get("summary", text[:120])
+
+    priority_label = analysis.get("priority", "Low")
+    priority_int   = 1 if priority_label == "High" else 0
+
+    embedding = generate_embedding(text)
+
     conn = get_db()
-    cur = conn.cursor()
-    
-    category = analysis.get("category", "note").lower()
-    decision = analysis.get("decision", "STORE").upper()
-    priority = analysis.get("priority", "Low")
-    emotion = analysis.get("emotion", "Neutral")
-    # 🟢 NEW: Extract the summary/topic from the NLP analysis
-    summary = analysis.get("search_query") or analysis.get("topic") or "No summary"
+    cur  = conn.cursor()
 
     try:
-        if decision == "IGNORE":
-            return "💤 Background noise ignored."
-
-        # 1. OFFICIAL/URGENT -> Reminders
-        if category in ["meeting", "deadline", "task", "schedule", "medicine"] or priority == "High" or emotion == "Urgent":
-            num_priority = 1 if (priority == "High" or emotion == "Urgent") else 2
+        # ── REMINDER / TASK / TODO / MEDICINE / DEADLINE ──────────────────────
+        if category in ("reminder", "task", "todo", "medicine", "deadline", "appointment"):
+            trigger = format_fuzzy_timestamp(
+                gmail_data.get("date") or analysis.get("trigger_time")
+            )
             cur.execute("""
-                INSERT INTO reminders (user_id, message, status, priority, priority_level, trigger_time)
-                VALUES (%s, %s, 'active', %s, %s, NOW() + INTERVAL '1 hour')
-            """, (user_id, original_text, num_priority, priority))
-            conn.commit()
-            return f"🚨 Recorded {priority} Priority {category.upper()}"
+                INSERT INTO reminders
+                    (user_id, message, trigger_time, status,
+                     priority_level, priority, is_owner_voice)
+                VALUES (%s, %s, %s, 'active', %s, %s, %s)
+            """, (
+                user_id,
+                gmail_data.get("content") or summary,
+                trigger,
+                priority_label,
+                priority_int,
+                flag,
+            ))
+            _log_timeline(cur, user_id,
+                          type_="reminder",
+                          title=gmail_data.get("title") or summary[:60],
+                          content=gmail_data.get("content") or text,
+                          category=category)
+            saved = f"reminders (priority={priority_label}/{priority_int})"
 
-        # 2. CONTINUOUS CAPTURE (Stitching Logic)
-        if category in ["lecture", "meeting"] or decision == "ARCHIVE":
+        # ── CALENDAR EVENT / MEETING / SCHEDULE ───────────────────────────────
+        elif category in ("event", "meeting", "schedule"):
+            start = format_fuzzy_timestamp(
+                gmail_data.get("date") or analysis.get("start_time")
+            )
             cur.execute("""
-                UPDATE notes SET 
-                    original_text = original_text || ' ' || %s, 
-                    summary = %s,
-                    updated_at = NOW()
-                WHERE user_id = %s AND category = %s AND updated_at > NOW() - INTERVAL '15 minutes'
-                RETURNING id;
-            """, (original_text, summary, user_id, category))
-            
-            if cur.fetchone():
-                conn.commit()
-                return f"📝 Appended to ongoing {category}"
+                INSERT INTO events
+                    (user_id, title, category, start_time,
+                     location_name, origin_location, description)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            """, (
+                user_id,
+                gmail_data.get("title") or summary[:80],
+                "personal",
+                start,
+                gmail_data.get("location") or "",
+                src,
+                gmail_data.get("content") or text,
+            ))
+            _log_timeline(cur, user_id,
+                          type_="event",
+                          title=gmail_data.get("title") or summary[:60],
+                          content=gmail_data.get("content") or text,
+                          category="event",
+                          start_time=start)
+            saved = "events"
 
-            # 🟢 Create new session: Save both text and summary
-            vec = embed_text(original_text)
+        # ── MEMORY ────────────────────────────────────────────────────────────
+        elif category == "memory":
             cur.execute("""
-                INSERT INTO notes (user_id, title, original_text, summary, category, embedding) 
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (user_id, f"{category.capitalize()} Session", original_text, summary, category, vec))
-            conn.commit()
-            return f"🎓 Recorded background {category}"
+                INSERT INTO memories
+                    (user_id, memory_type, content, embedding, confidence_score)
+                VALUES (%s, %s, %s, %s::vector, %s)
+            """, (user_id, "general", text, embedding, 0.6))
+            saved = "memories"
 
-        # 3. GENERAL MEMORIES
+        # ── LECTURE (long note with summary) ─────────────────────────────────
+        elif category == "lecture" or analysis.get("is_long"):
+            cur.execute("""
+                INSERT INTO notes
+                    (user_id, summary, original_text, embedding,
+                     origin_location, is_owner_voice)
+                VALUES (%s, %s, %s, %s::vector, %s, %s)
+            """, (user_id, summary, text, embedding, src, flag))
+            _log_timeline(cur, user_id,
+                          type_="note",
+                          title=summary[:60],
+                          content=text,
+                          category="lecture")
+            saved = "notes (lecture)"
+
+        # ── SHORT NOTE (default) ──────────────────────────────────────────────
         else:
-            vec = embed_text(original_text)
             cur.execute("""
-                INSERT INTO notes (user_id, title, original_text, summary, category, embedding) 
-                VALUES (%s, %s, %s, %s, 'background', %s)
-            """, (user_id, f"Voice Memo ({emotion})", original_text, summary, vec))
-            conn.commit()
-            return "✅ Background context saved."
+                INSERT INTO notes
+                    (user_id, summary, original_text, embedding,
+                     origin_location, is_owner_voice)
+                VALUES (%s, %s, %s, %s::vector, %s, %s)
+            """, (user_id, summary, text, embedding, src, flag))
+            saved = "notes"
+
+        conn.commit()
+        print(f"✅ Stored → {saved}  [user={user_id}, flag={flag}]")
+        return saved
 
     except Exception as e:
         conn.rollback()
-        return f"Error: {str(e)}"
-    finally:
-        cur.close()
-        conn.close()
-        
-        
-def format_fuzzy_timestamp(time_str):
-    """
-    Translates fuzzy AI extractions (like 'evening') into DB-valid timestamps.
-    Prevents: invalid input syntax for type timestamp.
-    """
-    if not time_str:
-        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    t = str(time_str).lower().strip()
-    now = datetime.now()
-    
-    # Logic for common LLM fuzzy extractions
-    target_date = now
-    if "tomorrow" in t:
-        target_date = now + timedelta(days=1)
-    elif "next week" in t:
-        target_date = now + timedelta(days=7)
-
-    # Time offsets
-    if "morning" in t:
-        hour, minute = 9, 0
-    elif "afternoon" in t:
-        hour, minute = 14, 0
-    elif "evening" in t:
-        hour, minute = 18, 0
-    elif "night" in t:
-        hour, minute = 21, 0
-    else:
-        # Try a hard parse if it's not a fuzzy keyword
-        try:
-            return date_parse(t).strftime("%Y-%m-%d %H:%M:%S")
-        except:
-            # Fallback to current time + 1 hour if totally unparseable
-            return (now + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
-
-    return target_date.replace(hour=hour, minute=minute, second=0).strftime("%Y-%m-%d %H:%M:%S")
-
-def get_semantic_context(user_query, user_id):
-    """Finds the top 3 most relevant notes using vector similarity."""
-    query_vec = model.encode(user_query).tolist()
-    conn = get_db()
-    cur = conn.cursor()
-    try:
-        cur.execute("""
-            SELECT original_text 
-            FROM notes 
-            WHERE user_id = %s 
-            ORDER BY embedding <=> %s::vector 
-            LIMIT 3;
-        """, (user_id, query_vec))
-        
-        context_chunks = cur.fetchall()
-        return " ".join([c[0] for c in context_chunks if c[0]])
+        print(f"❌ DB Save Error [{category}]: {e}")
+        return "Storage failed"
     finally:
         cur.close()
         conn.close()
 
-def log_chat(user_id, sender, text, location=None):
-    """Logs chat interactions with vector embeddings for RAG retrieval."""
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. CHAT LOG
+# ─────────────────────────────────────────────────────────────────────────────
+def log_chat(
+    user_id:  str,
+    sender:   str,
+    text:     str,
+    location: str = None,
+    flag:     int = 0,
+) -> None:
     conn = get_db()
-    cur = conn.cursor()
+    cur  = conn.cursor()
     try:
-        vec = model.encode(text).tolist()
+        vec = generate_embedding(text)
         cur.execute("""
-            INSERT INTO chat_messages (user_id, sender, text, location, embedding) 
-            VALUES (%s, %s, %s, %s, %s)
-        """, (user_id, sender, text, location, vec))
+            INSERT INTO chat_messages
+                (user_id, sender, text, location, embedding, is_owner_voice)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (user_id, sender, text, location, vec, flag))
         conn.commit()
     except Exception as e:
-        print(f"❌ Log Chat Error: {e}")
+        print(f"❌ log_chat error: {e}")
     finally:
         cur.close()
         conn.close()
 
 
-
-
-
-def save_to_appropriate_table(user_id, analysis, original_text=""):
-    """
-    Saves context silently to the DB. 
-    This is 'Passive Monitoring'. Everything is stored for RAG, 
-    but retrieval is blocked in the router if the voice isn't verified.
-    """
-    conn = get_db()
-    cur = conn.cursor()
-    
-    category = analysis.get("category", "note").lower()
-    decision = analysis.get("decision", "STORE").upper()
-    priority = analysis.get("priority", "Low")
-    emotion = analysis.get("emotion", "Neutral")
-
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. TIMELINE LOG (internal helper, uses open cursor)
+# ─────────────────────────────────────────────────────────────────────────────
+def _log_timeline(
+    cur,
+    user_id:    str,
+    type_:      str,
+    title:      str,
+    content:    str,
+    category:   str = "",
+    start_time: str = None,
+) -> None:
     try:
-        if decision == "IGNORE":
-            return "💤 Background noise ignored."
-
-        # 1. OFFICIAL/URGENT -> Reminders (Stays in DB for the owner)
-        if category in ["meeting", "deadline", "task", "schedule"] or priority == "High" or emotion == "Urgent":
-            num_priority = 1 if (priority == "High" or emotion == "Urgent") else 2
-            cur.execute("""
-                INSERT INTO reminders (user_id, message, status, priority, priority_level, trigger_time)
-                VALUES (%s, %s, 'active', %s, %s, NOW() + INTERVAL '1 hour')
-            """, (user_id, original_text, num_priority, priority))
-            conn.commit()
-            return f"🚨 Recorded {priority} Priority {category.upper()}"
-
-        # 2. CONTINUOUS CAPTURE (Stitching Logic)
-        if category in ["lecture", "meeting"] or decision == "ARCHIVE":
-            cur.execute("""
-                UPDATE notes SET original_text = original_text || ' ' || %s, updated_at = NOW()
-                WHERE user_id = %s AND category = %s AND updated_at > NOW() - INTERVAL '15 minutes'
-                RETURNING title;
-            """, (original_text, user_id, category))
-            
-            if cur.fetchone():
-                conn.commit()
-                return f"📝 Appended to ongoing {category}"
-
-            # Create new session if no recent match
-            title = f"{category.capitalize()} Session"
-            vec = embed_text(original_text)
-            cur.execute("""
-                INSERT INTO notes (user_id, title, original_text, category, embedding) 
-                VALUES (%s, %s, %s, %s, %s)
-            """, (user_id, title, original_text, category, vec))
-            conn.commit()
-            return f"🎓 Recorded background {category}"
-
-        # 3. GENERAL MEMORIES
-        else:
-            vec = embed_text(original_text)
-            cur.execute("""
-                INSERT INTO notes (user_id, title, original_text, category, embedding) 
-                VALUES (%s, %s, %s, 'background', %s)
-            """, (user_id, f"Voice Memo ({emotion})", original_text, vec))
-            conn.commit()
-            return "✅ Background context saved."
-
+        cur.execute("""
+            INSERT INTO timeline (user_id, type, title, content, category, start_time)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, (
+            user_id, type_, title[:120], content[:500],
+            category,
+            start_time or datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        ))
     except Exception as e:
-        conn.rollback()
-        return f"Error: {str(e)}"
+        print(f"⚠️  timeline log skipped: {e}")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. FUZZY TIMESTAMP PARSER
+# ─────────────────────────────────────────────────────────────────────────────
+def format_fuzzy_timestamp(time_str=None) -> str:
+    if not time_str:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    t   = str(time_str).lower().strip()
+    now = datetime.now()
+    target = now
+    if "tomorrow"   in t: target = now + timedelta(days=1)
+    elif "next week" in t: target = now + timedelta(days=7)
+    if   "morning"   in t: return target.replace(hour=9,  minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
+    elif "afternoon" in t: return target.replace(hour=14, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
+    elif "evening"   in t: return target.replace(hour=18, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
+    elif "night"     in t: return target.replace(hour=21, minute=0, second=0).strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        return date_parse(t).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return (now + timedelta(hours=1)).strftime("%Y-%m-%d %H:%M:%S")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. SEMANTIC CONTEXT (top-3 notes for RAG)
+# ─────────────────────────────────────────────────────────────────────────────
+def get_semantic_context(user_query: str, user_id: str) -> str:
+    query_vec = generate_embedding(user_query)
+    if not query_vec:
+        return ""
+    conn = get_db()
+    cur  = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT original_text FROM notes
+            WHERE user_id = %s AND embedding IS NOT NULL
+            ORDER BY embedding <=> %s::vector
+            LIMIT 3
+        """, (user_id, query_vec))
+        return " ".join(r[0] for r in cur.fetchall() if r[0])
+    except Exception as e:
+        print(f"⚠️  get_semantic_context: {e}")
+        return ""
     finally:
         cur.close()
         conn.close()

@@ -41,3 +41,19 @@ google-auth-oauthlib==1.2.1
 
 # --- Security ---
 passlib[bcrypt]==1.7.4
+
+
+# Fix for Python 3.13 + torch compatibility
+#
+# Run:
+#   pip install -r requirements_fix.txt
+#
+# Why:
+#   torch < 2.6 has no Python 3.13 wheels.
+#   speechbrain 1.0.x works with torch 2.6+ and torchaudio 2.6+
+#   The voice_auth.py patch handles the list_audio_backends stub automatically.
+ 
+torch==2.6.0
+torchaudio==2.6.0
+speechbrain==1.0.2
+ 

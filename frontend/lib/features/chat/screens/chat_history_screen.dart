@@ -1,119 +1,125 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
-import '../../../shared/widgets/glass_container.dart';
+import '../../../services/api_service.dart';
+import 'package:intl/intl.dart';
 
-class ChatHistoryScreen extends StatelessWidget {
-  const ChatHistoryScreen({super.key});
+class ChatHistoryScreen extends StatefulWidget {
+  final String userId;
+  const ChatHistoryScreen({super.key, required this.userId});
+
+  @override
+  State<ChatHistoryScreen> createState() => _ChatHistoryScreenState();
+}
+
+class _ChatHistoryScreenState extends State<ChatHistoryScreen> {
+  final ApiService _apiService = ApiService();
+  List<dynamic> _history = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchHistory();
+  }
+
+  Future<void> _fetchHistory() async {
+    final data = await _apiService.getChatHistory(widget.userId);
+    if (mounted) {
+      setState(() {
+        _history = data;
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: AppTheme.kBackgroundDark,
       appBar: AppBar(
-        title: const Text("Conversation Archives"),
-        actions: [
-          IconButton(icon: const Icon(Icons.sort, color: AppTheme.primaryMint), onPressed: () {}),
+        title: const Text("Memory Logs", style: TextStyle(letterSpacing: 1.5)),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator(color: AppTheme.kPrimaryTeal))
+          : _history.isEmpty
+              ? _buildEmptyState()
+              : ListView.builder(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: _history.length,
+                  // Reverse the list to show oldest at top, or newest at top depending on your DB ORDER BY
+                  itemBuilder: (context, index) {
+                    final msg = _history[index];
+                    final isUser = msg['sender'] == 'user';
+                    final timeStr = msg['time'] != null 
+                        ? DateFormat('MMM dd, hh:mm a').format(DateTime.parse(msg['time']))
+                        : "";
+                    final isVerified = msg['is_owner_voice'] == 1;
+
+                    return Align(
+                      alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(vertical: 8),
+                        padding: const EdgeInsets.all(16),
+                        constraints: BoxConstraints(
+                          maxWidth: MediaQuery.of(context).size.width * 0.75,
+                        ),
+                        decoration: BoxDecoration(
+                          color: isUser ? AppTheme.kPrimaryTeal.withOpacity(0.2) : AppTheme.kCardDark,
+                          borderRadius: BorderRadius.only(
+                            topLeft: const Radius.circular(20),
+                            topRight: const Radius.circular(20),
+                            bottomLeft: isUser ? const Radius.circular(20) : Radius.zero,
+                            bottomRight: isUser ? Radius.zero : const Radius.circular(20),
+                          ),
+                          border: Border.all(
+                            color: isUser ? AppTheme.kPrimaryTeal.withOpacity(0.5) : Colors.white10,
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              msg['content'] ?? "",
+                              style: const TextStyle(color: Colors.white, fontSize: 15),
+                            ),
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  timeStr,
+                                  style: const TextStyle(color: Colors.white38, fontSize: 10),
+                                ),
+                                if (isUser) ...[
+                                  const SizedBox(width: 8),
+                                  Icon(
+                                    isVerified ? Icons.verified : Icons.gpp_maybe,
+                                    size: 12,
+                                    color: isVerified ? Colors.green : Colors.redAccent,
+                                  )
+                                ]
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+    );
+  }
+
+  Widget _buildEmptyState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.history_toggle_off, color: Colors.white24, size: 64),
+          SizedBox(height: 16),
+          Text("No conversation logs found.", style: TextStyle(color: Colors.white54)),
         ],
-      ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            // Search Bar
-            TextField(
-              decoration: InputDecoration(
-                hintText: "Search logs by keyword...",
-                hintStyle: const TextStyle(color: Colors.grey),
-                prefixIcon: const Icon(Icons.search, color: Colors.grey),
-                filled: true,
-                fillColor: const Color(0xFF1E2630),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(15), borderSide: BorderSide.none),
-              ),
-            ),
-            const SizedBox(height: 20),
-
-            // Filter Chips
-            Row(
-              children: [
-                _buildFilterChip("All Sessions", true),
-                _buildFilterChip("Emails", false),
-                _buildFilterChip("Coding", false),
-              ],
-            ),
-            const SizedBox(height: 20),
-
-            // List Items
-            _buildHistoryItem("Prep for Interview", "10m ago • 14 messages", Icons.mic, Colors.green),
-            _buildHistoryItem("Drafting Resignation", "2h ago • 3 versions", Icons.edit_document, Colors.blue),
-            const SizedBox(height: 20),
-            
-            const Align(
-              alignment: Alignment.centerLeft, 
-              child: Text("YESTERDAY", style: TextStyle(color: Colors.grey, fontSize: 12, letterSpacing: 1.5))
-            ),
-            const SizedBox(height: 10),
-            
-            _buildHistoryItem("Python Debugging Help", "14:20 • 45m session", Icons.code, Colors.orange),
-            _buildHistoryItem("Gift Ideas for Mom", "09:15 • 12 items listed", Icons.lightbulb, Colors.purple),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppTheme.primaryMint,
-        child: const Icon(Icons.add, color: Colors.black),
-        onPressed: () {}, // Start new chat
-      ),
-    );
-  }
-
-  Widget _buildFilterChip(String label, bool isActive) {
-    return Container(
-      margin: const EdgeInsets.only(right: 10),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: BoxDecoration(
-        color: isActive ? AppTheme.primaryMint.withOpacity(0.2) : const Color(0xFF1E2630),
-        borderRadius: BorderRadius.circular(20),
-        border: isActive ? Border.all(color: AppTheme.primaryMint) : null,
-      ),
-      child: Text(
-        label, 
-        style: TextStyle(
-          color: isActive ? AppTheme.primaryMint : Colors.grey, 
-          fontWeight: FontWeight.bold
-        )
-      ),
-    );
-  }
-
-  Widget _buildHistoryItem(String title, String subtitle, IconData icon, Color iconColor) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 12.0),
-      child: GlassContainer(
-        color: const Color(0xFF1E2630),
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: iconColor.withOpacity(0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: iconColor, size: 20),
-            ),
-            const SizedBox(width: 15),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
-                  const SizedBox(height: 4),
-                  Text(subtitle, style: const TextStyle(color: Colors.grey, fontSize: 12)),
-                ],
-              ),
-            ),
-            const Icon(Icons.chevron_right, color: Colors.grey),
-          ],
-        ),
       ),
     );
   }

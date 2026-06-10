@@ -5,19 +5,22 @@ import '../../../../services/api_service.dart';
 import '../widgets/memory_pin_card.dart';
 
 class MemoryScreen extends StatefulWidget {
-  const MemoryScreen({super.key});
+  final String userId;
+  const MemoryScreen({super.key, required this.userId});
 
   @override
   State<MemoryScreen> createState() => _MemoryScreenState();
 }
 
 class _MemoryScreenState extends State<MemoryScreen> {
+  final ApiService _apiService = ApiService(); 
+  
   String selectedFilter = "All";
   final List<String> filters = ["All", "Secure", "Personal", "Work", "Health"];
   
   List<dynamic> memories = [];
   bool isLoading = true;
-  String? userId;
+  String? activeUserId;
 
   @override
   void initState() {
@@ -27,19 +30,33 @@ class _MemoryScreenState extends State<MemoryScreen> {
 
   Future<void> _loadData() async {
     final prefs = await SharedPreferences.getInstance();
-    userId = prefs.getString('user_id');
-    if (userId != null) {
-      _fetchMemories();
-    }
+    // Fallback to widget.userId if SharedPreferences is not yet set
+    activeUserId = prefs.getString('user_id') ?? widget.userId;
+    _fetchMemories();
   }
 
   Future<void> _fetchMemories() async {
+    if (!mounted) return;
     setState(() => isLoading = true);
-    final data = await ApiService.getMemories(userId!, category: selectedFilter);
-    setState(() {
-      memories = data;
-      isLoading = false;
-    });
+    
+    try {
+      // Use the instance _apiService instead of the class name ApiService
+// 🟢 Ensure the parameter name matches your updated ApiService
+        final data = await _apiService.getMemories(widget.userId, memoryType: selectedFilter);  
+        if (mounted) {
+        setState(() {
+          memories = data;
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() => isLoading = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error fetching memories: $e")),
+        );
+      }
+    }
   }
 
   void _onFilterChanged(String filter) {
@@ -51,18 +68,17 @@ class _MemoryScreenState extends State<MemoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.kBackgroundDark,
-      
-      // --- APP BAR ---
       appBar: AppBar(
         backgroundColor: AppTheme.kBackgroundDark,
+        elevation: 0,
         title: Row(
           children: [
             const Icon(Icons.psychology, color: AppTheme.kAccentGreen),
             const SizedBox(width: 10),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text("Memory Core", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+              children: const [
+                Text("Memory Core", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
                 Text("SYSTEM ACTIVE", style: TextStyle(fontSize: 10, color: AppTheme.kAccentGreen, letterSpacing: 1.5)),
               ],
             ),
@@ -72,17 +88,15 @@ class _MemoryScreenState extends State<MemoryScreen> {
           IconButton(onPressed: () {}, icon: const Icon(Icons.settings)),
         ],
       ),
-
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16.0),
         child: Column(
           children: [
-            // --- SEARCH BAR ---
             const SizedBox(height: 10),
             TextField(
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
-                hintText: "Search 4,021 memories...",
+                hintText: "Search memories...",
                 hintStyle: TextStyle(color: Colors.grey.shade600),
                 prefixIcon: const Icon(Icons.search, color: AppTheme.kPrimaryTeal),
                 suffixIcon: const Icon(Icons.tune, color: Colors.grey),
@@ -95,8 +109,6 @@ class _MemoryScreenState extends State<MemoryScreen> {
               ),
             ),
             const SizedBox(height: 16),
-
-            // --- FILTER CHIPS ---
             SizedBox(
               height: 40,
               child: ListView.builder(
@@ -129,8 +141,6 @@ class _MemoryScreenState extends State<MemoryScreen> {
               ),
             ),
             const SizedBox(height: 20),
-
-            // --- MEMORY GRID ---
             Expanded(
               child: isLoading
                   ? const Center(child: CircularProgressIndicator(color: AppTheme.kPrimaryTeal))
@@ -138,10 +148,10 @@ class _MemoryScreenState extends State<MemoryScreen> {
                       ? _buildEmptyState()
                       : GridView.builder(
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2, // 2 Columns
+                            crossAxisCount: 2,
                             crossAxisSpacing: 12,
                             mainAxisSpacing: 12,
-                            childAspectRatio: 0.8, // Taller cards
+                            childAspectRatio: 0.8,
                           ),
                           itemCount: memories.length,
                           itemBuilder: (context, index) {
@@ -158,12 +168,8 @@ class _MemoryScreenState extends State<MemoryScreen> {
           ],
         ),
       ),
-      
-      // --- FAB ---
       floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          // TODO: Open Add Memory Dialog
-        },
+        onPressed: () {},
         backgroundColor: AppTheme.kAccentGreen,
         child: const Icon(Icons.add, color: Colors.black),
       ),

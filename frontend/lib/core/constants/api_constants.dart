@@ -1,8 +1,9 @@
+//frontend\lib\core\constants\api_constants.dart
+
 class ApiConstants {
   // Use 10.0.2.2 for Android Emulator, localhost for iOS Simulator
   // static const String baseUrl = "http://10.0.2.2:8000";
-  static const String baseUrl = "http://192.168.1.33:8000";
-  
+static const String baseUrl = "http://10.243.75.215:8000";  
   // Auth
   static const String login = "$baseUrl/auth/login";
   static const String signup = "$baseUrl/auth/signup";
@@ -21,11 +22,15 @@ class ApiConstants {
   static const String uploadAudioEndpoint = uploadAudio;
   
   // Data
-  static const String dashboard = "$baseUrl/dashboard";
   static const String dashboardEndpoint = dashboard;
   static const String memories = "$baseUrl/memories"; // Note: You might need to add this route to backend if missing, or use /chat/history with filters
   static const String memoriesEndpoint = memories;
   static const String predict = "$baseUrl/predict"; // If you implement the prediction endpoint
   static const String predictScheduleEndpoint = "$baseUrl/predict/schedule";
   static const String analyticsPeriodEndpoint = "$baseUrl/analytics/period";
+  static const String prediction = "$baseUrl/memories/predict-timetable";
+  static const String dashboard = "$baseUrl/dashboard/activity-duration-analysis";
+  static const String reminders = "$baseUrl/reminders"; 
+  static const String toggleReminder = "$baseUrl/reminders/toggle";
+
 }

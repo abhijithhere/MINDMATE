@@ -1,3 +1,4 @@
+#services/db.py
 import psycopg2
 import psycopg2.extras
 import os
@@ -7,8 +8,8 @@ PG_CONFIG = {
     "host": "127.0.0.1",
     "port": 5432,
     "dbname": "mindmate",
-    "user": "mindmate_user",
-    "password": "mindmate123"
+    "user": "postgres",
+    "password": "postgres123"
 }
 
 

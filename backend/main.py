@@ -1,138 +1,202 @@
+# main.py
 import os
 import asyncio
 import psycopg2
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from pgvector.psycopg2 import register_vector
 
-# Import routers
 from app.routers import auth, chat, memories, dashboard, reminders
 from services.gmail import deep_sync_gmail
 from models.trainer import run_weekly_retraining
 
-# 🟢 PostgreSQL Connection Settings
 PG_CONFIG = {
-    "dbname": "mindmate",       # Matches the yellow cylinder in your image
-    "user": "postgres",         # Use 'postgres' if you haven't created 'mindmate_user'
-    "password": "postgres123",  # Your pgAdmin login password
-    "host": "127.0.0.1",
-    "port": 5432
+    "dbname":   "mindmate",
+    "user":     "postgres",
+    "password": "postgres123",
+    "host":     "127.0.0.1",
+    "port":     5432,
 }
 
+
 def initialize_db():
-    """Initializes tables and PGVector extension."""
+    """
+    Ensures all tables exist with correct schema.
+    NO foreign key constraints on user_id — matches actual production schema.
+    user_id is plain TEXT so any authenticated user_id string works.
+    """
     try:
-        conn = psycopg2.connect(**PG_CONFIG)
-        register_vector(conn)
+        conn   = psycopg2.connect(**PG_CONFIG)
         cursor = conn.cursor()
-        
+
         cursor.execute("CREATE EXTENSION IF NOT EXISTS vector;")
-        
-        # Users Table
+
+        # ── users ──────────────────────────────────────────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS users (
-                user_id TEXT PRIMARY KEY,
-                username TEXT,
-                password_hash TEXT
+                user_id       TEXT PRIMARY KEY,
+                username      VARCHAR,
+                password_hash TEXT NOT NULL DEFAULT '',
+                password      TEXT,
+                wake_word     TEXT,
+                created_at    TIMESTAMP DEFAULT now()
             )
         """)
-        # Reminders Table
+
+        # ── chat_messages ──────────────────────────────────────────────────────
         cursor.execute("""
-            CREATE TABLE IF NOT EXISTS reminders (
-                id SERIAL PRIMARY KEY,
-                user_id TEXT REFERENCES users(user_id) ON DELETE CASCADE,
-                message TEXT,
-                trigger_time TIMESTAMP,
-                status TEXT DEFAULT 'active',
-                priority_level TEXT,
-                priority INTEGER DEFAULT 2
+            CREATE TABLE IF NOT EXISTS chat_messages (
+                id             SERIAL PRIMARY KEY,
+                user_id        TEXT,
+                sender         TEXT,
+                text           TEXT,
+                location       TEXT,
+                embedding      vector(384),
+                is_owner_voice INTEGER DEFAULT 0,
+                created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
-        
-        # Notes/Memories Table
+
+        # ── notes ──────────────────────────────────────────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS notes (
-                id SERIAL PRIMARY KEY,
-                user_id TEXT REFERENCES users(user_id) ON DELETE CASCADE,
-                title TEXT,
-                summary TEXT,
-                original_text TEXT,
+                id              SERIAL PRIMARY KEY,
+                user_id         TEXT,
+                category        TEXT,
+                title           TEXT,
+                summary         TEXT,
+                original_text   TEXT,
                 origin_location TEXT,
-                embedding vector(384),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                embedding       vector(384),
+                is_owner_voice  INTEGER DEFAULT 0,
+                created_at      TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
 
-        # Events Table for Planner/Dashboard
+        # ── reminders ──────────────────────────────────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                id              SERIAL PRIMARY KEY,
+                user_id         TEXT,
+                event_id        INTEGER,
+                message         TEXT,
+                trigger_time    TIMESTAMP,
+                status          TEXT DEFAULT 'active',
+                recurrence_rule TEXT,
+                priority_level  TEXT,
+                priority        INTEGER DEFAULT 3,
+                is_owner_voice  INTEGER DEFAULT 0
+            )
+        """)
+
+        # ── events ─────────────────────────────────────────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS events (
-                id SERIAL PRIMARY KEY,
-                user_id TEXT REFERENCES users(user_id) ON DELETE CASCADE,
-                title TEXT,
-                description TEXT,
-                start_time TIMESTAMP,
-                location_name TEXT,
-                origin_location TEXT
+                id              SERIAL PRIMARY KEY,
+                user_id         TEXT,
+                title           TEXT,
+                category        TEXT,
+                start_time      TIMESTAMP,
+                end_time        TIMESTAMP,
+                location_id     INTEGER,
+                location_name   TEXT,
+                origin_location TEXT,
+                description     TEXT
             )
         """)
 
-        # Timeline/Memories Table
+        # ── memories ───────────────────────────────────────────────────────────
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS memories (
-                id SERIAL PRIMARY KEY,
-                user_id TEXT REFERENCES users(user_id) ON DELETE CASCADE,
-                memory_type TEXT,
-                title TEXT,
-                content TEXT,
-                confidence_score DOUBLE PRECISION,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                id               SERIAL PRIMARY KEY,
+                user_id          TEXT,
+                memory_type      TEXT,
+                title            TEXT,
+                content          TEXT,
+                confidence_score REAL,
+                embedding        vector(384),
+                created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_reinforced  TIMESTAMP
+            )
+        """)
+
+        # ── timeline ───────────────────────────────────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS timeline (
+                id         SERIAL PRIMARY KEY,
+                user_id    TEXT,
+                type       TEXT,
+                title      TEXT,
+                content    TEXT,
+                category   TEXT,
+                start_time TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+
+        # ── locations ──────────────────────────────────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS locations (
+                location_id SERIAL PRIMARY KEY,
+                user_id     TEXT,
+                name        TEXT
+            )
+        """)
+
+        # ── voice_analysis ─────────────────────────────────────────────────────
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS voice_analysis (
+                id                   SERIAL PRIMARY KEY,
+                user_id              TEXT,
+                associated_event_id  INTEGER,
+                original_transcript  TEXT,
+                emotion_label        TEXT,
+                stress_level         REAL
             )
         """)
 
         conn.commit()
         cursor.close()
         conn.close()
-        print("✅ PostgreSQL Initialized successfully.")
+        print("✅ PostgreSQL tables verified (no FK constraints).")
     except Exception as e:
-        print(f"❌ Database Startup Error: {e}")
+        print(f"❌ Database init error: {e}")
 
 
 async def monitor_new_emails_loop():
-    """Background task: Syncs Gmail every 5 minutes."""
-    user_id = "meanonymus87@gmail.com" 
+    """Syncs Gmail every 5 minutes."""
+    user_id = "meanonymus87@gmail.com"
     while True:
         try:
-            print(f"🤖 Proactive Agent: Checking Gmail for {user_id}...")
+            print(f"📬 Gmail agent: checking for {user_id}...")
             deep_sync_gmail(user_id, count=5)
         except Exception as e:
-            print(f"❌ Gmail Monitor Error: {e}")
-        await asyncio.sleep(300) 
+            print(f"❌ Gmail monitor error: {e}")
+        await asyncio.sleep(300)
+
 
 async def schedule_retraining():
-    """Background task: Retrains models every 7 days."""
+    """Retrains models every 7 days."""
     while True:
         try:
-            print("🚀 Starting Weekly Synapse Refresh...")
+            print("🚀 Weekly model retrain starting...")
             await run_weekly_retraining()
         except Exception as e:
-            print(f"❌ Training Loop Error: {e}")
-        await asyncio.sleep(604800) 
+            print(f"❌ Retrain error: {e}")
+        await asyncio.sleep(604800)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # --- STARTUP ---
     initialize_db()
     email_task = asyncio.create_task(monitor_new_emails_loop())
     train_task = asyncio.create_task(schedule_retraining())
-    print("🚀 All Proactive Background Tasks Started.")
+    print("🚀 Background tasks started.")
     yield
-    # --- SHUTDOWN ---
     email_task.cancel()
     train_task.cancel()
-    print("🛑 Background tasks shut down.")
+    print("🛑 Background tasks stopped.")
 
-# 🟢 MOVED THIS DOWN: Now it knows what 'lifespan' is!
+
 app = FastAPI(lifespan=lifespan)
 
 app.add_middleware(
@@ -143,18 +207,18 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 🛤️ ROUTE REGISTRATION
-app.include_router(auth.router, prefix="/auth", tags=["Auth"])
-app.include_router(chat.router, prefix="/chat", tags=["Chat"])
-app.include_router(memories.router, prefix="/memories", tags=["Memories"])
+app.include_router(auth.router,      prefix="/auth",      tags=["Auth"])
+app.include_router(chat.router,      prefix="/chat",      tags=["Chat"])
+app.include_router(memories.router,  prefix="/memories",  tags=["Memories"])
 app.include_router(dashboard.router, prefix="/dashboard", tags=["Dashboard"])
 app.include_router(reminders.router, prefix="/reminders", tags=["Reminders"])
 
+
 @app.get("/")
 async def root():
-    return {"message": "MindMate Backend Active", "ip": "192.168.1.34"}
+    return {"message": "MindMate Backend Active"}
+
 
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)
-

@@ -1,8 +1,12 @@
+#models/trainer.py
 import os
 import glob
 import asyncio
-# CHANGE THIS LINE:
-from models.train_user_habit_model import train_user_model 
+
+import models.train_user_habit_model as m
+
+print("📦 FILE LOADED:", m.__file__)
+print("📦 FUNCTIONS:", dir(m))
 
 async def run_weekly_retraining():
     print("🚀 Starting Weekly Synapse Refresh for all users...")
@@ -17,8 +21,8 @@ async def run_weekly_retraining():
             
             print(f"⚙️ Retraining HabitEngine for: {user_email}")
             
-            # CHANGE THIS LINE TOO:
-            train_user_model(user_email) 
+            # 🔥 SAFE CALL
+            m.train_user_model(user_email)
             
         except Exception as e:
             print(f"❌ Failed to train model for {user_email}: {e}")

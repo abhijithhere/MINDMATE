@@ -1,9 +1,36 @@
 import 'package:flutter/material.dart';
 import '../../../core/theme/app_theme.dart';
 import '../../../shared/widgets/glass_container.dart';
+import '../../../services/api_service.dart';
 
-class EmailHubScreen extends StatelessWidget {
-  const EmailHubScreen({super.key});
+class EmailHubScreen extends StatefulWidget {
+  final String userId;
+  const EmailHubScreen({super.key, required this.userId});
+
+  @override
+  State<EmailHubScreen> createState() => _EmailHubScreenState();
+}
+
+class _EmailHubScreenState extends State<EmailHubScreen> {
+  final ApiService _apiService = ApiService();
+  List<dynamic> _emails = [];
+  bool _isLoading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchGmailData();
+  }
+
+  Future<void> _fetchGmailData() async {
+    final data = await _apiService.getGmailData(widget.userId);
+    if (mounted) {
+      setState(() {
+        _emails = data;
+        _isLoading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -12,60 +39,47 @@ class EmailHubScreen extends StatelessWidget {
       appBar: AppBar(
         title: const Text("Email Intelligence"),
         backgroundColor: AppTheme.kCardDark,
-        actions: [
-          IconButton(onPressed: () {}, icon: const Icon(Icons.settings))
-        ],
+        elevation: 0,
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // --- 1. DONUT CHARTS ROW ---
-            const Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
+      body: _isLoading 
+        ? const Center(child: CircularProgressIndicator(color: AppTheme.kPrimaryTeal))
+        : Padding(
+            padding: const EdgeInsets.all(20.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _DonutStat(label: "Work", count: "8", color: AppTheme.kAccentGreen, percentage: 0.7),
-                _DonutStat(label: "Personal", count: "3", color: AppTheme.kPrimaryTeal, percentage: 0.3),
-                _DonutStat(label: "Spam", count: "24", color: Colors.blueAccent, percentage: 0.9),
-              ],
-            ),
-            const SizedBox(height: 30),
-            
-            // --- 2. ANALYSIS FEED ---
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
+                const Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    _DonutStat(label: "Extracted", count: "12", color: AppTheme.kAccentGreen, percentage: 0.8),
+                    _DonutStat(label: "Pending", count: "3", color: AppTheme.kPrimaryTeal, percentage: 0.3),
+                  ],
+                ),
+                const SizedBox(height: 30),
                 const Text("Analysis Feed", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                TextButton(onPressed: (){}, child: const Text("Clear All", style: TextStyle(color: AppTheme.kAccentGreen))),
+                const SizedBox(height: 10),
+                Expanded(
+                  child: _emails.isEmpty 
+                    ? const Center(child: Text("No extracted events from Gmail.", style: TextStyle(color: Colors.white54)))
+                    : ListView.builder(
+                        itemCount: _emails.length,
+                        itemBuilder: (context, index) {
+                          final email = _emails[index];
+                          // Adapting standard event/timeline columns to the Email UI
+                          return _EmailCard(
+                            sender: email['sender'] ?? "Gmail Sync",
+                            role: email['category'] ?? "Automated Extraction",
+                            time: email['start_time'] ?? "Recent",
+                            action: email['title'] ?? "Action Required",
+                            snippet: email['description'] ?? email['content'] ?? "No summary available.",
+                            isAlert: (email['priority'] ?? "Low") == "High",
+                          );
+                        },
+                      ),
+                ),
               ],
             ),
-            const SizedBox(height: 10),
-
-            Expanded(
-              child: ListView(
-                children: const [
-                  _EmailCard(
-                    sender: "Prof. Hamilton",
-                    role: "Thesis Committee",
-                    time: "10m ago",
-                    action: "Action: Submit final thesis draft by 5:00 PM today.",
-                    snippet: "Just a reminder that the portal closes promptly this evening...",
-                  ),
-                  _EmailCard(
-                    sender: "Delta Airlines",
-                    role: "Travel Updates",
-                    time: "2h ago",
-                    action: "Check-in for Tokyo opens in 2 hours.",
-                    snippet: "Your trip to Tokyo (HND) is coming up. Get ready for your flight...",
-                    isAlert: false,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
+          ),
     );
   }
 }
@@ -83,16 +97,12 @@ class _DonutStat extends StatelessWidget {
     return Column(
       children: [
         SizedBox(
-          height: 60,
-          width: 60,
+          height: 60, width: 60,
           child: Stack(
             children: [
               Center(child: Text(count, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))),
               CircularProgressIndicator(
-                value: percentage,
-                strokeWidth: 6,
-                color: color,
-                backgroundColor: Colors.white10,
+                value: percentage, strokeWidth: 6, color: color, backgroundColor: Colors.white10,
               ),
             ],
           ),
@@ -105,11 +115,7 @@ class _DonutStat extends StatelessWidget {
 }
 
 class _EmailCard extends StatelessWidget {
-  final String sender;
-  final String role;
-  final String time;
-  final String action;
-  final String snippet;
+  final String sender, role, time, action, snippet;
   final bool isAlert;
 
   const _EmailCard({
@@ -132,7 +138,7 @@ class _EmailCard extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    CircleAvatar(backgroundColor: Colors.grey.shade800, child: Text(sender[0])),
+                    CircleAvatar(backgroundColor: Colors.grey.shade800, child: Text(sender.isNotEmpty ? sender[0].toUpperCase() : "G")),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -156,7 +162,7 @@ class _EmailCard extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(isAlert ? Icons.assignment : Icons.flight_takeoff, color: isAlert ? AppTheme.kAccentGreen : AppTheme.kPrimaryTeal, size: 20),
+                  Icon(isAlert ? Icons.assignment_late : Icons.auto_awesome, color: isAlert ? AppTheme.kAccentGreen : AppTheme.kPrimaryTeal, size: 20),
                   const SizedBox(width: 10),
                   Expanded(child: Text(action, style: TextStyle(color: isAlert ? AppTheme.kAccentGreen : AppTheme.kPrimaryTeal, fontWeight: FontWeight.bold))),
                 ],

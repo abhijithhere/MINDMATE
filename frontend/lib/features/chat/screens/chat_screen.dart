@@ -1,12 +1,15 @@
+// frontend/lib/features/chat/screens/chat_screen.dart
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../../../core/theme/app_theme.dart';
-import '../../../../core/constants/api_constants.dart';
+import 'package:http/http.dart' as http;
+import '../../../core/constants/api_constants.dart';
+import '../../../core/theme/app_theme.dart';
+import '../widgets/chat_bubble.dart';
 
 class ChatScreen extends StatefulWidget {
-  const ChatScreen({super.key});
+  final String userId;
+  final List<Map<String, dynamic>>? initialHistory;
+  const ChatScreen({super.key, required this.userId, this.initialHistory});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -14,83 +17,56 @@ class ChatScreen extends StatefulWidget {
 
 class _ChatScreenState extends State<ChatScreen> {
   final TextEditingController _controller = TextEditingController();
-  List<Map<String, dynamic>> messages = [];
-  bool isLoading = true;
-  String? userId;
+  List<Map<String, dynamic>> _messages = [];
+  bool _isTyping = false;
 
   @override
   void initState() {
     super.initState();
-    _loadChatHistory();
-  }
-
-  Future<void> _loadChatHistory() async {
-    final prefs = await SharedPreferences.getInstance();
-    userId = prefs.getString('user_id');
-    if (userId == null) return;
-
-    final url = Uri.parse('${ApiConstants.baseUrl}/chat/history?user_id=$userId');
-    try {
-      final response = await http.get(url);
-      if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        final List<dynamic> rawMessages = data['messages'] ?? [];
-        
-        setState(() {
-          // 🛡️ CRASH PROOFING: Ensure 'text' is never null
-          messages = rawMessages.map((m) => {
-            'sender': m['sender'] ?? 'ai',
-            'text': m['text'] ?? "..." // If text is null, show dots
-          }).toList().cast<Map<String, dynamic>>();
-          isLoading = false;
-        });
-      }
-    } catch (e) {
-      print("Chat Error: $e");
-      setState(() => isLoading = false);
+    _messages = [];
+    if (widget.initialHistory != null) {
+      _messages = widget.initialHistory!.map((msg) {
+        return {
+          'sender': msg['sender'] ?? 'ai',
+          'text': msg['content'] ?? msg['text'] ?? '',
+          'timestamp': msg['time'] ?? DateTime.now().toIso8601String(),
+        };
+      }).toList().cast<Map<String, dynamic>>();
     }
   }
 
   Future<void> _sendMessage() async {
-    if (_controller.text.isEmpty || userId == null) return;
+    if (_controller.text.trim().isEmpty) return;
 
-    String text = _controller.text;
+    final userText = _controller.text.trim();
+    setState(() {
+      _messages.add({"sender": "user", "text": userText, "timestamp": DateTime.now().toIso8601String()});
+      _isTyping = true;
+    });
     _controller.clear();
 
-    setState(() {
-      messages.add({'sender': 'user', 'text': text});
-    });
-
-    final url = Uri.parse('${ApiConstants.baseUrl}/chat/send');
     try {
       final response = await http.post(
-        url,
+        Uri.parse(ApiConstants.chatSend),
         headers: {"Content-Type": "application/json"},
-        body: json.encode({
-          "user_id": userId,
-          "text": text,
-          "sender": "user"
-        }),
+        body: jsonEncode({"user_id": widget.userId, "text": userText}),
       );
 
-      // 🛡️ CRASH PROOFING: Handle backend response safely
-      String reply = "..."; 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        // Look for 'ai_response', 'response', or 'message'
-        reply = data['ai_response'] ?? data['response'] ?? data['message'] ?? "I couldn't think of a response.";
-      } else {
-        reply = "Error: ${response.statusCode}";
+        final data = jsonDecode(response.body);
+        setState(() {
+          // 🟢 FIX: Handle both 'ai_response' and 'response' keys to prevent null errors
+          _messages.add({
+            "sender": "ai", 
+            "text": data['ai_response'] ?? data['response'] ?? "I processed that, but had trouble formatting the answer.",
+            "timestamp": DateTime.now().toIso8601String()
+          });
+        });
       }
-
-      setState(() {
-        messages.add({'sender': 'ai', 'text': reply});
-      });
-      
     } catch (e) {
-      setState(() {
-        messages.add({'sender': 'ai', 'text': "Connection Error"});
-      });
+      debugPrint("Chat Error: $e");
+    } finally {
+      if (mounted) setState(() => _isTyping = false);
     }
   }
 
@@ -98,85 +74,48 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppTheme.kBackgroundDark,
-      appBar: AppBar(
-        title: const Text("MindMate Chat"),
-        backgroundColor: AppTheme.kCardDark,
-        iconTheme: const IconThemeData(color: Colors.white),
-      ),
+      appBar: AppBar(title: const Text("MINDMATE CHAT"), backgroundColor: Colors.transparent),
       body: Column(
         children: [
           Expanded(
-            child: isLoading
-                ? const Center(child: CircularProgressIndicator(color: AppTheme.kPrimaryTeal))
-                : ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: messages.length,
-                    itemBuilder: (context, index) {
-                      final msg = messages[index];
-                      final isUser = msg['sender'] == 'user';
-                      // 🛡️ FINAL SAFETY CHECK: Ensure we display a String
-                      final String messageText = msg['text']?.toString() ?? "";
-
-                      return Align(
-                        alignment: isUser ? Alignment.centerRight : Alignment.centerLeft,
-                        child: Container(
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: isUser ? AppTheme.kPrimaryTeal : AppTheme.kCardDark,
-                            borderRadius: BorderRadius.only(
-                              topLeft: const Radius.circular(16),
-                              topRight: const Radius.circular(16),
-                              bottomLeft: isUser ? const Radius.circular(16) : Radius.zero,
-                              bottomRight: isUser ? Radius.zero : const Radius.circular(16),
-                            ),
-                          ),
-                          child: Text(
-                            messageText,
-                            style: TextStyle(
-                              color: isUser ? Colors.black : Colors.white,
-                              fontSize: 16,
-                            ),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-          ),
-          // Input Area
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: AppTheme.kCardDark,
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: "Type a message...",
-                      hintStyle: TextStyle(color: AppTheme.kTextGrey.withOpacity(0.5)),
-                      filled: true,
-                      fillColor: AppTheme.kBackgroundDark,
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(24),
-                        borderSide: BorderSide.none,
-                      ),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 20),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                CircleAvatar(
-                  backgroundColor: AppTheme.kPrimaryTeal,
-                  child: IconButton(
-                    icon: const Icon(Icons.send, color: Colors.black),
-                    onPressed: _sendMessage,
-                  ),
-                ),
-              ],
+            child: ListView.builder(
+              padding: const EdgeInsets.all(15),
+              itemCount: _messages.length,
+              itemBuilder: (context, index) {
+                final msg = _messages[index];
+                // 🟢 FIX: Provide a default string to avoid the Red Screen
+                return ChatBubble(
+                  message: msg['text'] ?? "...", 
+                  isUser: msg['sender'] == 'user',
+                  timestamp: DateTime.parse(msg['timestamp'] ?? DateTime.now().toIso8601String()),
+                );
+              },
             ),
           ),
+          if (_isTyping) const Padding(
+            padding: EdgeInsets.all(8.0),
+            child: LinearProgressIndicator(color: AppTheme.kPrimaryTeal, backgroundColor: Colors.black),
+          ),
+          _buildInputArea(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildInputArea() {
+    return Container(
+      padding: const EdgeInsets.all(10),
+      color: AppTheme.kCardDark,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _controller,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(hintText: "Type a message...", border: InputBorder.none),
+            ),
+          ),
+          IconButton(icon: const Icon(Icons.send, color: AppTheme.kPrimaryTeal), onPressed: _sendMessage),
         ],
       ),
     );

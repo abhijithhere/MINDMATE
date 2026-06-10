@@ -1,24 +1,30 @@
+// lib/features/voice_mode_screen.dart
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import '../core/theme/app_theme.dart';
 import '../services/api_service.dart';
+import '../services/tts_service.dart';
 
 class VoiceModeScreen extends StatefulWidget {
-  const VoiceModeScreen({super.key});
+  final String? userId;
+  const VoiceModeScreen({super.key, this.userId});
 
   @override
   State<VoiceModeScreen> createState() => _VoiceModeScreenState();
 }
 
-class _VoiceModeScreenState extends State<VoiceModeScreen> with SingleTickerProviderStateMixin {
+class _VoiceModeScreenState extends State<VoiceModeScreen>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   final AudioRecorder _audioRecorder = AudioRecorder();
-  
-  bool isRecording = false;
+  final ApiService _apiService = ApiService();
+
+  bool _isOn = false;
   bool isProcessing = false;
   String? userId;
   String liveTranscript = "Tap the orb to speak...";
@@ -28,98 +34,145 @@ class _VoiceModeScreenState extends State<VoiceModeScreen> with SingleTickerProv
   void initState() {
     super.initState();
     _controller = AnimationController(
-      vsync: this, 
-      duration: const Duration(seconds: 2)
-    );
+        vsync: this, duration: const Duration(seconds: 1));
     _loadUser();
   }
 
   Future<void> _loadUser() async {
-    final prefs = await SharedPreferences.getInstance();
-    userId = prefs.getString('user_id');
+    if (widget.userId != null) {
+      userId = widget.userId;
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      userId = prefs.getString('user_id') ?? 'guest';
+    }
+    setState(() {});
   }
 
   @override
   void dispose() {
+    _isOn = false;
     _controller.dispose();
     _audioRecorder.dispose();
+    TtsService.stop();
     super.dispose();
   }
 
   Future<void> _toggleRecording() async {
-    if (isProcessing) return;
+    if (isProcessing && !_isOn) return;
+
+    await TtsService.stop();
 
     if (await Permission.microphone.request().isGranted) {
-      if (isRecording) {
-        await _stopAndSend();
+      setState(() {
+        _isOn = !_isOn;
+      });
+
+      if (_isOn) {
+        setState(() {
+          liveTranscript = "Listening...";
+          aiResponseText = "";
+          _controller.repeat(reverse: true);
+        });
+        _startLoop();
       } else {
-        await _startRecording();
+        setState(() {
+          liveTranscript = "Paused.";
+          _controller.stop();
+          _controller.reset();
+        });
+        if (await _audioRecorder.isRecording()) {
+          await _audioRecorder.stop();
+        }
       }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Microphone permission is required."))
+          const SnackBar(content: Text("Microphone permission is required.")),
         );
       }
     }
   }
 
-  Future<void> _startRecording() async {
-    try {
-      final tempDir = await getTemporaryDirectory();
-      final path = '${tempDir.path}/voice_command.m4a';
+  // 🟢 FIX: Continuous chunking loop for live UI updates
+  Future<void> _startLoop() async {
+    while (_isOn && mounted) {
+      try {
+        final tempDir = await getTemporaryDirectory();
+        final path = '${tempDir.path}/chunk_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-      await _audioRecorder.start(const RecordConfig(), path: path);
+        await _audioRecorder.start(
+          const RecordConfig(
+            encoder: AudioEncoder.wav,
+            sampleRate: 16000,
+            numChannels: 1,
+          ),
+          path: path,
+        );
 
-      setState(() {
-        isRecording = true;
-        liveTranscript = "Listening...";
-        aiResponseText = ""; 
-        _controller.repeat(reverse: true); 
-      });
-    } catch (e) {
-      print("Recording Error: $e");
+        // Record for 3 seconds per chunk
+        await Future.delayed(const Duration(seconds: 3));
+
+        if (!_isOn) {
+          await _audioRecorder.stop();
+          break;
+        }
+
+        final savedPath = await _audioRecorder.stop();
+        if (savedPath != null && _isOn) {
+          _processChunk(savedPath); // Fire and forget so we can instantly start next chunk
+        }
+      } catch (e) {
+        debugPrint("Loop Error: $e");
+      }
     }
   }
 
-  Future<void> _stopAndSend() async {
+  Future<void> _processChunk(String path) async {
+    if (!mounted || !_isOn || userId == null) return;
+
     try {
-      final path = await _audioRecorder.stop();
+      final result = await _apiService.uploadAudio(userId!, path);
 
-      setState(() {
-        isRecording = false;
-        isProcessing = true;
-        liveTranscript = "Processing...";
-        _controller.stop();
-        _controller.reset();
-      });
+      final transcript = result['transcript']?.toString().trim() ?? "";
+      final aiReply = result['ai_response']?.toString().trim() ?? "";
+      final action = result['action']?.toString() ?? "";
 
-      if (path != null && userId != null) {
-        final result = await ApiService.uploadAudio(userId!, File(path));
-        
+      if (!mounted || !_isOn) return;
+
+      // Update transcript live as the backend joins the sentences together
+      if (transcript.isNotEmpty) {
         setState(() {
-          isProcessing = false;
-          liveTranscript = result['transcript'] ?? "Done";
-          aiResponseText = result['ai_response'] ?? "";
+          liveTranscript = transcript;
         });
-      } else {
+      }
+
+      // If backend NLP triggers an AI response
+      if (aiReply.isNotEmpty && action != 'buffering') {
         setState(() {
+          aiResponseText = aiReply;
           isProcessing = false;
-          liveTranscript = "Error: User ID missing or recording failed.";
+        });
+        await TtsService.speak(aiReply);
+      } else if (action == 'crud_required' || action == 'stored') {
+        setState(() {
+          isProcessing = true;
+          aiResponseText = "Thinking...";
         });
       }
     } catch (e) {
-      print("Upload Error: $e");
-      setState(() {
-        isProcessing = false;
-        liveTranscript = "Connection Error";
-      });
+      debugPrint("Upload Error: $e");
+      if (mounted && _isOn) {
+        setState(() {
+          liveTranscript = "Connection Error...";
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      resizeToAvoidBottomInset: false,
       backgroundColor: Colors.black,
       appBar: AppBar(
         backgroundColor: Colors.transparent,
@@ -130,52 +183,100 @@ class _VoiceModeScreenState extends State<VoiceModeScreen> with SingleTickerProv
         ),
       ),
       body: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           Expanded(
             child: Center(
               child: GestureDetector(
                 onTap: _toggleRecording,
-                child: AnimatedBuilder(
-                  animation: _controller,
-                  builder: (context, child) {
-                    double scale = isRecording ? (_controller.value * 30) : 0;
-                    return Container(
-                      width: 150 + scale,
-                      height: 150 + scale,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        gradient: AppTheme.mintGradient,
-                        boxShadow: isRecording 
-                          ? [BoxShadow(color: AppTheme.kPrimaryTeal.withOpacity(0.6), blurRadius: 60, spreadRadius: 10)] 
-                          : [BoxShadow(color: AppTheme.kPrimaryTeal.withOpacity(0.2), blurRadius: 20)],
-                      ),
-                      child: Icon(isRecording ? Icons.mic : Icons.mic_none, size: 60, color: Colors.black),
-                    );
-                  },
+                child: RepaintBoundary(
+                  child: AnimatedBuilder(
+                    animation: _controller,
+                    builder: (context, child) {
+                      final pulse = _isOn
+                          ? 180.0 + (_controller.value * 20.0)
+                          : 180.0;
+
+                      return Container(
+                        width: pulse,
+                        height: pulse,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: AppTheme.mintGradient,
+                          boxShadow: [
+                            BoxShadow(
+                              color: AppTheme.kPrimaryTeal.withOpacity(
+                                  _isOn ? 0.6 : 0.2),
+                              blurRadius: _isOn ? 50 : 20,
+                              spreadRadius: _isOn ? 10 : 0,
+                            )
+                          ],
+                        ),
+                        child: Icon(
+                          isProcessing
+                              ? Icons.hourglass_empty
+                              : (_isOn ? Icons.stop : Icons.mic),
+                          size: 70,
+                          color: Colors.black,
+                        ),
+                      );
+                    },
+                  ),
                 ),
               ),
             ),
           ),
-          Container(
-            padding: const EdgeInsets.all(30),
-            width: double.infinity,
-            decoration: BoxDecoration(
-              color: AppTheme.kCardDark,
-              borderRadius: const BorderRadius.only(topLeft: Radius.circular(30), topRight: Radius.circular(30))
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(liveTranscript, style: const TextStyle(color: AppTheme.kTextGrey, fontSize: 16, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
-                const SizedBox(height: 20),
-                if (aiResponseText.isNotEmpty)
-                  Text(aiResponseText, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w500), textAlign: TextAlign.center),
-                const SizedBox(height: 20),
-              ],
-            ),
-          ),
+          _buildResponsePanel(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildResponsePanel() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 40),
+      width: double.infinity,
+      decoration: const BoxDecoration(
+        color: AppTheme.kCardDark,
+        borderRadius: BorderRadius.only(
+          topLeft: Radius.circular(40),
+          topRight: Radius.circular(40),
+        ),
+      ),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              liveTranscript.toUpperCase(),
+              style: const TextStyle(
+                color: AppTheme.kPrimaryTeal,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.5,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 15),
+            Text(
+              aiResponseText.isEmpty
+                  ? "MindMate is ready."
+                  : aiResponseText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                height: 1.4,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 30),
+            if (isProcessing)
+              const LinearProgressIndicator(
+                backgroundColor: Colors.black,
+                color: AppTheme.kPrimaryTeal,
+              ),
+          ],
+        ),
       ),
     );
   }

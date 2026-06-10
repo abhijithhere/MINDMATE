@@ -1,20 +1,24 @@
-
+//main.dart
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:permission_handler/permission_handler.dart';
+
+import 'services/notification_service.dart';
+import 'services/tts_service.dart';
 import 'services/background_service.dart';
+
 import 'main_layout.dart';
 import 'features/auth/screens/login_screen.dart';
 import 'core/theme/app_theme.dart';
 
-// 🟢 Service and permissions remain
-
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   await _requestPermissions();
+  await NotificationService.init();
+  await TtsService.init();
   await initializeService();
 
   SharedPreferences prefs = await SharedPreferences.getInstance();
@@ -32,6 +36,7 @@ Future<void> _requestPermissions() async {
 class MyApp extends StatelessWidget {
   final bool isLoggedIn;
   final String? userId;
+
   const MyApp({super.key, required this.isLoggedIn, required this.userId});
 
   @override
@@ -45,9 +50,9 @@ class MyApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       title: 'MindMate',
       theme: AppTheme.darkTheme,
-      home: isLoggedIn && userId != null 
-        ? MainLayout(userId: userId!) 
-        : const LoginScreen(),
+      home: userId == null
+          ? const LoginScreen()
+          : MainLayout(userId: userId!),
     );
   }
 }

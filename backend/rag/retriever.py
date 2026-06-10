@@ -1,117 +1,87 @@
 # rag/retriever.py
+"""
+Semantic retrieval via pgvector cosine similarity (<=>).
+
+retrieve_context  — searches chat_messages, notes, memories, events
+get_recent_history — last N messages for conversational context
+"""
+
 from services.db import get_db
-from rag.embedder import embed_text
+from rag.embedder import generate_embedding
 
-def retrieve_context(user_id: str, query: str, limit: int = 5) -> str:
+
+def retrieve_context(user_id: str, text: str, top_k: int = 3) -> list[str]:
+    """
+    Semantic search across all four embedding tables.
+    Returns a deduplicated list of relevant text snippets.
+    """
+    embedding = generate_embedding(text)
+    if embedding is None:
+        return []
+
     conn = get_db()
-    cur = conn.cursor()
+    cur  = conn.cursor()
+    results = []
 
-    query_vec = embed_text(query)
+    # (table, text_column, embedding_column)
+    tables = [
+        ("chat_messages", "text",          "embedding"),
+        ("notes",         "original_text", "embedding"),
+        ("memories",      "content",       "embedding"),
+        ("events",        "description",   "embedding"),
+    ]
 
-    cur.execute(
-        """
-        SELECT text, timestamp
-        FROM chat_messages
-        WHERE user_id = %s
-          AND embedding IS NOT NULL
-        ORDER BY embedding <=> %s::vector
-        LIMIT %s
-        """,
-        (user_id, query_vec, limit)
-    )
+    for table, text_col, emb_col in tables:
+        try:
+            cur.execute(f"""
+                SELECT {text_col}
+                FROM {table}
+                WHERE user_id = %s
+                  AND {text_col}  IS NOT NULL
+                  AND {emb_col}   IS NOT NULL
+                ORDER BY {emb_col} <=> %s::vector
+                LIMIT %s
+            """, (user_id, embedding, top_k))
+            rows = cur.fetchall()
+            results.extend(r[0] for r in rows if r[0])
+        except Exception as e:
+            print(f"⚠️  Retrieval skip [{table}]: {e}")
 
-    rows = cur.fetchall()
+    cur.close()
     conn.close()
 
-    if not rows:
-        return ""
+    # Deduplicate and drop very short strings
+    seen = set()
+    clean = []
+    for r in results:
+        s = r.strip()
+        if len(s) > 5 and s not in seen:
+            seen.add(s)
+            clean.append(s)
+    return clean
 
-    # Include timestamp so LLM CANNOT hallucinate dates
-    context_lines = []
-    for text, ts in rows:
-        ts_str = ts.strftime("%Y-%m-%d %H:%M:%S") if ts else "date not recorded"
-        context_lines.append(f"[{ts_str}] {text}")
 
-    return "\n".join(context_lines)
-
-# rag/retriever.py
-from services.db import get_db
-from rag.embedder import embed_text
-from datetime import datetime
-
-def retrieve_combined_context(user_id: str, query: str, limit: int = 3) -> str:
+def get_recent_history(user_id: str, limit: int = 3) -> list[str]:
     """
-    Fetches the ultimate context: 
-    - Future Schedule (Events)
-    - Semantic Memories (Notes)
-    - Active Tasks (Reminders)
-    - Recent Conversations (Chat History)
+    Returns the last `limit` chat messages as ["sender: text", ...] (oldest first).
+    Used by generate_conversational_response for short-term context.
     """
     conn = get_db()
-    cur = conn.cursor()
-    query_vec = embed_text(query)
-
-    # 1. Fetch Upcoming Events & Reminders (Structured)
-    cur.execute("""
-        SELECT message, trigger_time, priority_level 
-        FROM reminders 
-        WHERE user_id = %s AND status = 'active'
-        ORDER BY priority ASC, trigger_time ASC LIMIT 3
-    """, (user_id,))
-    reminders = cur.fetchall()
-
-    cur.execute("""
-        SELECT title, start_time, location_name 
-        FROM events 
-        WHERE user_id = %s AND start_time >= NOW() - INTERVAL '6 hours'
-        ORDER BY start_time ASC LIMIT 3
-    """, (user_id,))
-    events = cur.fetchall()
-
-    # 2. Fetch Relevant Notes (Semantic Vector Search)
-    cur.execute("""
-        SELECT original_text, created_at 
-        FROM notes 
-        WHERE user_id = %s 
-        ORDER BY embedding <=> %s::vector 
-        LIMIT %s
-    """, (user_id, query_vec, limit))
-    notes = cur.fetchall()
-
-    # 3. Fetch Past Conversations (Semantic Vector Search)
-    cur.execute("""
-        SELECT sender, text, created_at 
-        FROM chat_messages 
-        WHERE user_id = %s 
-        ORDER BY embedding <=> %s::vector 
-        LIMIT %s
-    """, (user_id, query_vec, limit))
-    chats = cur.fetchall()
-
-    conn.close()
-
-    # 4. Format for the Personal Assistant Persona
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    context = f"CURRENT SYSTEM TIME: {now}\n\n"
-
-    if reminders:
-        context += "--- PENDING TASKS ---\n"
-        for r in reminders:
-            context += f"- [{r[2]}] {r[0]} due at {r[1]}\n"
-
-    if events:
-        context += "\n--- UPCOMING SCHEDULE ---\n"
-        for e in events:
-            context += f"- Event: {e[0]} at {e[1]} ({e[2]})\n"
-
-    if notes:
-        context += "\n--- PAST MEMORIES & NOTES ---\n"
-        for n in notes:
-            context += f"- Memory ({n[1].date()}): {n[0]}\n"
-
-    if chats:
-        context += "\n--- PREVIOUS RELEVANT CHATS ---\n"
-        for c in chats:
-            context += f"- {c[0]}: {c[1]} ({c[2].strftime('%H:%M')})\n"
-
-    return context
+    cur  = conn.cursor()
+    try:
+        cur.execute("""
+            SELECT sender, text
+            FROM chat_messages
+            WHERE user_id = %s
+            ORDER BY created_at DESC
+            LIMIT %s
+        """, (user_id, limit))
+        rows = cur.fetchall()
+        # Reverse so oldest is first (natural reading order)
+        return [f"{r[0]}: {r[1]}" for r in reversed(rows)]
+    except Exception as e:
+        print(f"⚠️  get_recent_history error: {e}")
+        return []
+    finally:
+        cur.close()
+        conn.close()

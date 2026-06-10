@@ -19,16 +19,21 @@ samples, guidance on mobile development, and a full API reference.
 cd frontend
 flutter emulator
 
+
+flutter clean
+flutter pub get
 ## find the emulator
 
-flutter emulators --launch Pixel_6    
-
+flutter emulators --launch Pixel_6  
+flutter run -d emulator-5554  
+flutter run -d 10BE6N11HK000B9
 ## to run backend
+pip install -r requirements.txt
 
- uvicorn app.main:app --reload           
+uvicorn app.main:app --reload           
 
-  uvicorn main:app --reload --host 0.0.0.0 --port 8000   
-
+uvicorn main:app --reload --host 0.0.0.0 --port 8000   
+$env:PYTHONPATH = "."; uvicorn main:app --reload --host 0.0.0.0 --port 8000
   The Whisper model is hidden here:
 C:\Users\abhij\.cache\huggingface\hub\models--Systran--faster-whisper-tiny\snapshots\d90ca5fe260221311c53c58e660288d3deb8d356   
 
@@ -41,4 +46,3 @@ to do
 1. coversational bot
 2. tts
 3. knowledge guidence
-4. voice authentication.

@@ -11,7 +11,7 @@ import 'package:mindmate/main.dart';
 void main() {
   testWidgets('Renders MindMate AI title', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MindMateApp());
+    await tester.pumpWidget(const MyApp(isLoggedIn: false, userId: 'test')); // Updated for current main.dart structure
 
     // Verify that the title is rendered.
     expect(find.text('MindMate AI'), findsOneWidget);

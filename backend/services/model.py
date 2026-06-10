@@ -1,8 +1,8 @@
+#backend\services\model.py
 import joblib
 import os
 import numpy as np
 from datetime import datetime
-
 class MindMateModel:
     def __init__(self):
         self.model = None
@@ -11,7 +11,7 @@ class MindMateModel:
         self.fatigue_map = {'Low': 0, 'Medium': 1, 'High': 2}
         self.reverse_activity_map = {v: k for k, v in self.activity_map.items()}
         self._load_models()
-
+        
     def _load_models(self):
         try:
             base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
